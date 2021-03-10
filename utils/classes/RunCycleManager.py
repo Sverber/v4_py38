@@ -10,7 +10,7 @@ import torchvision.transforms as transforms
 
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
-import pandas as pdun
+import pandas as pd
 import time
 import json
 
@@ -66,13 +66,13 @@ class RunCycleManager:
         self.tb = SummaryWriter(comment=f"-{run}")
 
         images, labels = next(iter(self.loader))
-        grid = torchvision.utils.make_grid(images)
+        # grid = torchvision.utils.make_grid(images)
 
-        self.tb.add_image("images", grid)
-        self.tb.add_graph(self.netG_A2B, images.to(device))
-        self.tb.add_graph(self.netG_B2A, images.to(device))
-        self.tb.add_graph(self.netD_A, images.to(device))
-        self.tb.add_graph(self.netD_B, images.to(device))
+        # self.tb.add_image("images", grid)
+        # self.tb.add_graph(self.netG_A2B, images.to(device))
+        # self.tb.add_graph(self.netG_B2A, images.to(device))
+        # self.tb.add_graph(self.netD_A, images.to(device))
+        # self.tb.add_graph(self.netD_B, images.to(device))
 
     def end_run(self) -> None:
         """ [ Insert documentation ] """
