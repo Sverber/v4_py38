@@ -1,0 +1,15 @@
+# Ignore all auto generated files at every level
+**/__pycache__
+**/.vscode  
+
+# Ignore dataset folders directories content
+dataset/*
+outputs/*
+results/*
+weights/*
+
+# Keep the folders directories
+!dataset/.gitkeep 
+!outputs/.gitkeep 
+!results/.gitkeep 
+!weights/.gitkeep 
