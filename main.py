@@ -6,9 +6,11 @@ import os
 import sys
 import glob
 import time
+import math
 import random
 import argparse
 import itertools
+import unicodedata
 import numpy as np
 import pandas as pd
 
@@ -24,6 +26,7 @@ import torchvision.transforms as transforms
 
 from PIL import Image
 from tqdm import tqdm
+from datetime import datetime
 from collections import OrderedDict
 from torch.utils.data import DataLoader, Dataset
 
@@ -44,16 +47,19 @@ from utils.models.Generator import Generator
 os.system("cls")
 
 
-# Constants: directories
+# Constants: required directories
 DIR_DATASET = f"./dataset"
 DIR_OUTPUTS = f"./outputs"
 DIR_RESULTS = f"./results"
 DIR_WEIGHTS = f"./weights"
 
 
-# Constants: dataset and run name
+# Constants: dataset name
 NAME_DATASET = f"horse2zebra_000_999"
-NAME_RUN = f"{int(time.time())}_{NAME_DATASET}"
+
+
+# Constants: system
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # Constants: parameters
@@ -62,9 +68,9 @@ RANDM_CROP = 128
 PRINT_FREQ = 20
 
 
-# Set the system- and training parameters
-parameters = OrderedDict(
-    device=[torch.device("cuda" if torch.cuda.is_available() else "cpu")],
+# Configure network parameters
+PARAMETERS: OrderedDict = OrderedDict(
+    device=[DEVICE],
     shuffle=[True],
     num_workers=[4],
     learning_rate=[0.0002],
@@ -75,7 +81,7 @@ parameters = OrderedDict(
 
 
 # Transformations on dataset
-dataset_transforms = transforms.Compose(
+dataset_transforms: transforms = transforms.Compose(
     [
         transforms.Resize(int(IMAGE_SIZE), Image.BICUBIC),
         transforms.RandomCrop(int(RANDM_CROP)),
@@ -87,13 +93,13 @@ dataset_transforms = transforms.Compose(
 
 
 # Dataset for training
-dataset_train = ImageDataset(
+dataset_train: ImageDataset = ImageDataset(
     root=f"./{DIR_DATASET}/{NAME_DATASET}", mode="train", unaligned=True, transform=dataset_transforms
 )
 
 
 # Dataset for testing
-dataset_test = ImageDataset(
+dataset_test: ImageDataset = ImageDataset(
     root=f"./{DIR_DATASET}/{NAME_DATASET}", mode="test", unaligned=True, transform=dataset_transforms
 )
 
@@ -101,16 +107,29 @@ dataset_test = ImageDataset(
 # Training function
 def train() -> None:
 
-    # Make directories for training
-    try:
-        os.makedirs(os.path.join(DIR_OUTPUTS, NAME_RUN, "A"))
-        os.makedirs(os.path.join(DIR_OUTPUTS, NAME_RUN, "B"))
-        os.makedirs(os.path.join(DIR_WEIGHTS, NAME_RUN))
-    except OSError:
-        pass
+    """ Insert documentation """
 
-    # Iterate over every run, based on the configurated parameters
-    for run in RunCycleBuilder.get_runs(parameters):
+    # Iterate over every run, based on the configurated params
+    for run in RunCycleBuilder.get_runs(PARAMETERS):
+
+        # Store today's date in string format
+        TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
+        TODAY_TIME = datetime.today().strftime("%H.%M.%S")
+
+        # Create a unique name for this run
+        RUN_NAME = f"{TODAY_TIME}___EP{run.num_epochs}_DE{run.decay_epochs}_LR{run.learning_rate}_BS{run.batch_size}"
+        RUN_PATH = f"{NAME_DATASET}/{TODAY_DATE}/{RUN_NAME}"
+
+        """ Insert a save params function as .txt file / incorporate in RunCycleManager """
+
+        # Make required directories for storing the training output and model weights
+        try:
+            os.makedirs(os.path.join(DIR_OUTPUTS, RUN_PATH, "A"))
+            os.makedirs(os.path.join(DIR_OUTPUTS, RUN_PATH, "B"))
+            os.makedirs(os.path.join(DIR_WEIGHTS, RUN_PATH))
+        except Exception as e:
+            print(e)
+            pass
 
         # Create Generator and Discriminator models
         netG_A2B = Generator().to(run.device)
@@ -124,7 +143,7 @@ def train() -> None:
         netD_A.apply(weights_init)
         netD_B.apply(weights_init)
 
-        # define loss function (adversarial_loss) and optimizer
+        # define loss function (adversarial_loss) 
         cycle_loss = torch.nn.L1Loss().to(run.device)
         identity_loss = torch.nn.L1Loss().to(run.device)
         adversarial_loss = torch.nn.MSELoss().to(run.device)
@@ -152,7 +171,14 @@ def train() -> None:
         # Instantiate an instance of the RunManager class
         manager = RunCycleManager()
 
+        # Track the start of the run
+        manager.begin_run(run, run.device, netG_A2B, netG_B2A, netD_A, netD_B, loader)
+
+        # Iterate through all the epochs
         for epoch in range(0, run.num_epochs):
+            
+            # Track the start of the epoch
+            manager.begin_epoch()
 
             # Create progress bar
             progress_bar = tqdm(enumerate(loader), total=len(loader))
@@ -292,10 +318,10 @@ def train() -> None:
                 if i % PRINT_FREQ == 0:
 
                     vutils.save_image(
-                        real_image_A, f"{DIR_OUTPUTS}/{NAME_RUN}/A/_real_samples.png", normalize=True,
+                        real_image_A, f"{DIR_OUTPUTS}/{RUN_PATH}/A/_real_samples.png", normalize=True,
                     )
                     vutils.save_image(
-                        real_image_B, f"{DIR_OUTPUTS}/{NAME_RUN}/B/_real_samples.png", normalize=True,
+                        real_image_B, f"{DIR_OUTPUTS}/{RUN_PATH}/B/_real_samples.png", normalize=True,
                     )
 
                     fake_image_A = 0.5 * (netG_B2A(real_image_B).data + 1.0)
@@ -303,21 +329,21 @@ def train() -> None:
 
                     # Save the real-time fake images A & B to a .png
                     vutils.save_image(
-                        fake_image_A.detach(), f"{DIR_OUTPUTS}/{NAME_RUN}/A/_fake_samples.png", normalize=True,
+                        fake_image_A.detach(), f"{DIR_OUTPUTS}/{RUN_PATH}/A/_fake_samples.png", normalize=True,
                     )
                     vutils.save_image(
-                        fake_image_B.detach(), f"{DIR_OUTPUTS}/{NAME_RUN}/B/_fake_samples.png", normalize=True,
+                        fake_image_B.detach(), f"{DIR_OUTPUTS}/{RUN_PATH}/B/_fake_samples.png", normalize=True,
                     )
 
                     # Save the per-epoch fake images A & B to a .png
                     vutils.save_image(
                         fake_image_A.detach(),
-                        f"{DIR_OUTPUTS}/{NAME_RUN}/A/fake_samples_epoch_{epoch}.png",
+                        f"{DIR_OUTPUTS}/{RUN_PATH}/A/fake_samples_epoch_{epoch}.png",
                         normalize=True,
                     )
                     vutils.save_image(
                         fake_image_B.detach(),
-                        f"{DIR_OUTPUTS}/{NAME_RUN}/B/fake_samples_epoch_{epoch}.png",
+                        f"{DIR_OUTPUTS}/{RUN_PATH}/B/fake_samples_epoch_{epoch}.png",
                         normalize=True,
                     )
 
@@ -326,19 +352,17 @@ def train() -> None:
                     np_fake_image_B = real_image_B.reshape(1, -1).squeeze().cpu().numpy()
 
                     # Save the real-time fake image tensor to a .csv
-                    np.savetxt(f"{DIR_OUTPUTS}/{NAME_RUN}/A/_fake_samples.csv", np_fake_image_A, delimiter=",")
-                    np.savetxt(f"{DIR_OUTPUTS}/{NAME_RUN}/B/_fake_samples.csv", np_fake_image_B, delimiter=",")
-
-                    pass
+                    np.savetxt(f"{DIR_OUTPUTS}/{RUN_PATH}/A/_fake_samples.csv", np_fake_image_A, delimiter=",")
+                    np.savetxt(f"{DIR_OUTPUTS}/{RUN_PATH}/B/_fake_samples.csv", np_fake_image_B, delimiter=",")
 
                 # </end> for i, data in enumerate(loader):
                 pass
 
             # Check points, save weights after each epoch
-            torch.save(netG_A2B.state_dict(), f"{DIR_WEIGHTS}/{NAME_RUN}/netG_A2B_epoch_{epoch}.pth")
-            torch.save(netG_B2A.state_dict(), f"{DIR_WEIGHTS}/{NAME_RUN}/netG_B2A_epoch_{epoch}.pth")
-            torch.save(netD_A.state_dict(), f"{DIR_WEIGHTS}/{NAME_RUN}/netD_A_epoch_{epoch}.pth")
-            torch.save(netD_B.state_dict(), f"{DIR_WEIGHTS}/{NAME_RUN}/netD_B_epoch_{epoch}.pth")
+            torch.save(netG_A2B.state_dict(), f"{DIR_WEIGHTS}/{RUN_PATH}/netG_A2B_epoch_{epoch}.pth")
+            torch.save(netG_B2A.state_dict(), f"{DIR_WEIGHTS}/{RUN_PATH}/netG_B2A_epoch_{epoch}.pth")
+            torch.save(netD_A.state_dict(), f"{DIR_WEIGHTS}/{RUN_PATH}/netD_A_epoch_{epoch}.pth")
+            torch.save(netD_B.state_dict(), f"{DIR_WEIGHTS}/{RUN_PATH}/netD_B_epoch_{epoch}.pth")
 
             # Update learning rates after each epoch
             lr_scheduler_G_A2B.step()
@@ -346,17 +370,22 @@ def train() -> None:
             lr_scheduler_D_A.step()
             lr_scheduler_D_B.step()
 
+            # Track the end of the epoch
+            manager.end_epoch()
+
             # </end> for epoch in range(0, run.num_epochs):
             pass
 
         # Save last check points, after every run
-        torch.save(netG_A2B.state_dict(), f"{DIR_WEIGHTS}/{NAME_RUN}/netG_A2B.pth")
-        torch.save(netG_B2A.state_dict(), f"{DIR_WEIGHTS}/{NAME_RUN}/netG_B2A.pth")
-        torch.save(netD_A.state_dict(), f"{DIR_WEIGHTS}/{NAME_RUN}/netD_A.pth")
-        torch.save(netD_B.state_dict(), f"{DIR_WEIGHTS}/{NAME_RUN}/netD_B.pth")
+        torch.save(netG_A2B.state_dict(), f"{DIR_WEIGHTS}/{RUN_PATH}/netG_A2B.pth")
+        torch.save(netG_B2A.state_dict(), f"{DIR_WEIGHTS}/{RUN_PATH}/netG_B2A.pth")
+        torch.save(netD_A.state_dict(), f"{DIR_WEIGHTS}/{RUN_PATH}/netD_A.pth")
+        torch.save(netD_B.state_dict(), f"{DIR_WEIGHTS}/{RUN_PATH}/netD_B.pth")
 
-        # </end> for run in RunCycleBuilder.get_runs(parameters):
-        pass
+        # Track the end of the run
+        manager.end_run()
+        
+        # </end> for run in RunCycleBuilder.get_runs(params):
 
     # </end> def train():
     pass
@@ -365,15 +394,25 @@ def train() -> None:
 # Testing function
 def test(model_netG_A2B: str, model_netG_B2A: str) -> None:
 
-    # Make directories for testing
-    try:
-        os.makedirs(os.path.join(DIR_RESULTS, NAME_RUN, "A"))
-        os.makedirs(os.path.join(DIR_RESULTS, NAME_RUN, "B"))
-    except:
-        pass
+    """ Insert documentation """
 
-    # Iterate over every run, based on the configurated parameters
-    for run in RunCycleBuilder.get_runs(parameters):
+    # Iterate over every run, based on the configurated params
+    for run in RunCycleBuilder.get_runs(PARAMETERS):
+
+        # Store today's date in string format
+        TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
+        TODAY_TIME = datetime.today().strftime("%H.%M.%S")
+
+        # Create a unique name for this run
+        RUN_NAME = f"{TODAY_TIME}___EP{run.num_epochs}_DE{run.decay_epochs}_LR{run.learning_rate}_BS{run.batch_size}"
+        RUN_PATH = f"{NAME_DATASET}/{TODAY_DATE}/{RUN_NAME}"
+
+        # Make required directories for testing
+        try:
+            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "A"))
+            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "B"))
+        except Exception as e:
+            pass
 
         # Allow cuddn to look for the optimal set of algorithms to improve runtime speed
         cudnn.benchmark = True
@@ -407,11 +446,14 @@ def test(model_netG_A2B: str, model_netG_B2A: str) -> None:
             fake_image_B = 0.5 * (netG_A2B(real_images_A).data + 1.0)
 
             # Save image files
-            vutils.save_image(fake_image_A.detach(), f"{DIR_RESULTS}/{NAME_RUN}/A/{i + 1:04d}.png", normalize=True)
-            vutils.save_image(fake_image_B.detach(), f"{DIR_RESULTS}/{NAME_RUN}/B/{i + 1:04d}.png", normalize=True)
+            vutils.save_image(fake_image_A.detach(), f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}.png", normalize=True)
+            vutils.save_image(fake_image_B.detach(), f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}.png", normalize=True)
 
             # Print a progress bar in terminal
             progress_bar.set_description(f"Process images {i + 1} of {len(loader)}")
+
+    # </end> def test():
+    pass
 
 
 # Execute main code

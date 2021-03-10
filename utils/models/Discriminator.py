@@ -4,21 +4,39 @@ import torch.nn.functional as F
 
 
 class Discriminator(nn.Module):
+
+    """ Insert documentation """
+
     def __init__(self):
-        super(Discriminator, self).__init__()
+        super().__init__()
 
         self.main = nn.Sequential(
+            #
+            # Input layer
+            #
             nn.Conv2d(3, 64, 4, stride=2, padding=1),
             nn.LeakyReLU(0.2, inplace=True),
+            #
+            # Upsampling
+            #
             nn.Conv2d(64, 128, 4, stride=2, padding=1),
             nn.InstanceNorm2d(128),
             nn.LeakyReLU(0.2, inplace=True),
+            #
+            # Upsampling
+            #
             nn.Conv2d(128, 256, 4, stride=2, padding=1),
             nn.InstanceNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
+            #
+            # Upsampling
+            #
             nn.Conv2d(256, 512, 4, padding=1),
             nn.InstanceNorm2d(512),
             nn.LeakyReLU(0.2, inplace=True),
+            #
+            # Output layer
+            #
             nn.Conv2d(512, 1, 4, padding=1),
         )
 
