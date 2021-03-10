@@ -47,8 +47,8 @@ os.system("cls")
 # Constants: directories
 DIR_DATASET = f"./dataset"
 DIR_OUTPUTS = f"./outputs"
-DIR_WEIGHTS = f"./weights"
 DIR_RESULTS = f"./results"
+DIR_WEIGHTS = f"./weights"
 
 
 # Constants: dataset and run name
@@ -57,9 +57,9 @@ NAME_RUN = f"{int(time.time())}_{NAME_DATASET}"
 
 
 # Constants: parameters
-IMAGE_SIZE = 128
-RANDM_CROP = 100
-PRINT_FREQ = 1
+IMAGE_SIZE = 156
+RANDM_CROP = 128
+PRINT_FREQ = 20
 
 
 # Set the system- and training parameters
@@ -67,7 +67,7 @@ parameters = OrderedDict(
     device=[torch.device("cuda" if torch.cuda.is_available() else "cpu")],
     shuffle=[True],
     num_workers=[4],
-    learning_rate=[0.05],
+    learning_rate=[0.0002],
     batch_size=[1],
     num_epochs=[100],
     decay_epochs=[50],
@@ -321,19 +321,13 @@ def train() -> None:
                         normalize=True,
                     )
 
-                    """
-                    
-                    # # Save the real-time fake image tensor to a .csv
-                    # np_fake_image_A = fake_image_A.cpu().numpy()
-                    # np_fake_image_B = fake_image_B.cpu().numpy()
+                    # Transform 4D tensor to 1D numpy array
+                    np_fake_image_A = real_image_A.reshape(1, -1).squeeze().cpu().numpy()
+                    np_fake_image_B = real_image_B.reshape(1, -1).squeeze().cpu().numpy()
 
-                    # np_flatten_fake_image_A = np_fake_image_A.reshape(r)
-                    # np_flatten_fake_image_B = np_fake_image_B.reshape(r)
-
-                    # np.save(f"{DIR_OUTPUTS}/{NAME_RUN}/A/_fake_samples.csv", np_flatten_fake_image_A)
-                    # np.save(f"{DIR_OUTPUTS}/{NAME_RUN}/B/_fake_samples.csv", np_flatten_fake_image_B)
-
-                    """
+                    # Save the real-time fake image tensor to a .csv
+                    np.savetxt(f"{DIR_OUTPUTS}/{NAME_RUN}/A/_fake_samples.csv", np_fake_image_A, delimiter=",")
+                    np.savetxt(f"{DIR_OUTPUTS}/{NAME_RUN}/B/_fake_samples.csv", np_fake_image_B, delimiter=",")
 
                     pass
 
