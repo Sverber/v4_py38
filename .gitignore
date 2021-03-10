@@ -6,10 +6,15 @@
 dataset/*
 outputs/*
 results/*
+runs/*
+synthesis/assets/A/*
+synthesis/assets/B/*
+synthesis/models/*
 weights/*
 
 # Keep the folders directories
 !dataset/.gitkeep 
 !outputs/.gitkeep 
 !results/.gitkeep 
+!runs/.gitkeep 
 !weights/.gitkeep 
