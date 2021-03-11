@@ -38,10 +38,13 @@ class Run:
 
 
 class RunCycleManager:
+
     """ [ Insert documentation ] """
 
     def __init__(self) -> None:
+
         """ [ Insert documentation ] """
+
         self.run = Run()
         self.epoch = Epoch()
         self.netG_A2B = None
@@ -52,7 +55,11 @@ class RunCycleManager:
         self.tb = None
 
     def begin_run(self, run, device, netG_A2B, netG_B2A, netD_A, netD_B, loader) -> None:
+
+        return None
+
         """ [ Insert documentation ] """
+
         self.run.start_time = time.time()
         self.run.params = run
         self.run.count += 1
@@ -75,19 +82,31 @@ class RunCycleManager:
         # self.tb.add_graph(self.netD_B, images.to(device))
 
     def end_run(self) -> None:
+
+        return None
+
         """ [ Insert documentation ] """
+
         self.tb.close()
         self.epoch.count = 0
 
     def begin_epoch(self) -> None:
+
+        return None
+
         """ [ Insert documentation ] """
+
         self.epoch.start_time = time.time()
         self.epoch.count += 1
         self.epoch.loss = 0
         self.epoch.num_correct = 0
 
     def end_epoch(self, save_runs=True, print_df=False) -> None:
+
+        return None
+
         """ [ Insert documentation ] """
+
         self.epoch.duration = time.time() - self.epoch.start_time
         self.run.duration = time.time() - self.run.start_time
 
@@ -121,18 +140,25 @@ class RunCycleManager:
             )
 
     def track_loss(self, loss, batch) -> None:
+
         """ [ Insert documentation ] """
+
         self.epoch.loss += loss.item() * batch[0].shape[0]
 
     def track_num_correct(self, preds, labels) -> None:
+
         """ [ Insert documentation ] """
+
         self.epoch.num_correct += self.get_num_correct(preds, labels)
 
     def get_num_correct(self, preds, labels) -> int:
+
         """ [ Insert documentation ] """
+
         return preds.argmax(dim=1).eq(labels).sum().item()
 
     def save(self, fileName) -> None:
+        
         """ [ Insert documentation ] """
 
         pd.DataFrame.from_dict(self.run.data, orient="columns").to_csv(

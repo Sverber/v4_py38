@@ -94,6 +94,7 @@ class ResnetEncoder(nn.Module):
 
 """
 
+
 class Image:
 
     """ Insert class documentation """
@@ -113,6 +114,7 @@ class Image:
         self.FILE_TYPE: str = image_ftype
 
         pass
+
 
 class Model:
 
@@ -163,11 +165,7 @@ class Synthesis:
         )
 
         # Image class (data)
-        self.image = Image(
-            imdir_source=imdir_source,
-            imdir_target=imdir_target,
-            image_ftype=image_ftype,
-        )
+        self.image = Image(imdir_source=imdir_source, imdir_target=imdir_target, image_ftype=image_ftype,)
 
         # Networks
         self.encoder = None
@@ -238,7 +236,7 @@ class Synthesis:
         with torch.no_grad():
             for idx, image_path in enumerate(self.paths):
 
-                """ [TO-DO] Check this """ 
+                """ [TO-DO] Check this """
                 # Make sure that no disparity predictions are made on disparity images
                 # Obsolute now, since there are A and B folders.
                 if image_path.endswith("_disp.jpg"):
@@ -277,10 +275,6 @@ class Synthesis:
                 print(f"Processed {idx + 1} of {len(self.paths)} images - saved prediction to: {name_dest_im}")
 
         pass
-
-    def _check_output_dir() -> None:
-        return None
-        _
 
     """ Private methods """
 

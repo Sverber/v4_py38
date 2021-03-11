@@ -58,7 +58,8 @@ DIR_WEIGHTS = f"./weights"
 
 
 # Constants: dataset name
-NAME_DATASET = f"horse2zebra_000_999"
+# NAME_DATASET = f"horse2zebra_000_999"
+NAME_DATASET = f"kitti_synthesized_000_999"
 
 
 # Constants: system
@@ -66,8 +67,9 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # Constants: parameters
-IMAGE_SIZE = 156
-RANDM_CROP = 128
+IMAGE_SIZE = (122, 35)
+RATIO_CROP = 0.82
+RANDM_CROP = (int(IMAGE_SIZE[0] * RATIO_CROP), int(IMAGE_SIZE[1] * RATIO_CROP))
 PRINT_FREQ = 20
 
 
@@ -77,17 +79,17 @@ PARAMETERS: OrderedDict = OrderedDict(
     shuffle=[True],
     num_workers=[4],
     learning_rate=[0.0002],
-    batch_size=[1],
-    num_epochs=[10],
-    decay_epochs=[5],
+    batch_size=[6],
+    num_epochs=[100],
+    decay_epochs=[50],
 )
 
 
 # Transformations on dataset
 dataset_transforms: transforms = transforms.Compose(
     [
-        transforms.Resize(int(IMAGE_SIZE), Image.BICUBIC),
-        transforms.RandomCrop(int(RANDM_CROP)),
+        transforms.Resize(IMAGE_SIZE, Image.BICUBIC),
+        transforms.RandomCrop(RANDM_CROP),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
@@ -129,9 +131,11 @@ def train() -> None:
         try:
             os.makedirs(os.path.join(DIR_OUTPUTS, RUN_PATH, "A"))
             os.makedirs(os.path.join(DIR_OUTPUTS, RUN_PATH, "B"))
+            os.makedirs(os.path.join(DIR_OUTPUTS, RUN_PATH, "A", "epochs"))
+            os.makedirs(os.path.join(DIR_OUTPUTS, RUN_PATH, "B", "epochs"))
             os.makedirs(os.path.join(DIR_WEIGHTS, RUN_PATH))
         except OSError:
-            pass
+                pass
 
         # Create Generator and Discriminator models
         netG_A2B = Generator().to(run.device)
@@ -145,7 +149,7 @@ def train() -> None:
         netD_A.apply(weights_init)
         netD_B.apply(weights_init)
 
-        # define loss function (adversarial_loss) 
+        # define loss function (adversarial_loss)
         cycle_loss = torch.nn.L1Loss().to(run.device)
         identity_loss = torch.nn.L1Loss().to(run.device)
         adversarial_loss = torch.nn.MSELoss().to(run.device)
@@ -171,16 +175,16 @@ def train() -> None:
         loader = DataLoader(dataset_train, batch_size=run.batch_size, num_workers=run.num_workers, shuffle=run.shuffle)
 
         # Instantiate an instance of the RunManager class
-        # manager = RunCycleManager()
+        manager = RunCycleManager()
 
         # Track the start of the run
-        # manager.begin_run(run, run.device, netG_A2B, netG_B2A, netD_A, netD_B, loader)
+        manager.begin_run(run, run.device, netG_A2B, netG_B2A, netD_A, netD_B, loader)
 
         # Iterate through all the epochs
         for epoch in range(0, run.num_epochs):
-            
+
             # Track the start of the epoch
-            # manager.begin_epoch()
+            manager.begin_epoch()
 
             # Create progress bar
             progress_bar = tqdm(enumerate(loader), total=len(loader))
@@ -188,177 +192,192 @@ def train() -> None:
             # Iterate over the data loader
             for i, data in progress_bar:
 
-                # Get image A and image B
-                real_image_A = data["A"].to(run.device)
-                real_image_B = data["B"].to(run.device)
+                try:
 
-                # Real data label is 1, fake data label is 0.
-                real_label = torch.full((run.batch_size, 1), 1, device=run.device, dtype=torch.float32)
-                fake_label = torch.full((run.batch_size, 1), 0, device=run.device, dtype=torch.float32)
+                    # Get image A and image B
+                    real_image_A = data["A"].to(run.device)
+                    real_image_B = data["B"].to(run.device)
 
-                """ (1) Update Generator networks: A2B and B2A """
+                    # Real data label is 1, fake data label is 0.
+                    real_label = torch.full((run.batch_size, 1), 1, device=run.device, dtype=torch.float32)
+                    fake_label = torch.full((run.batch_size, 1), 0, device=run.device, dtype=torch.float32)
 
-                # Zero the gradients
-                optimizer_G_A2B.zero_grad()
-                optimizer_G_B2A.zero_grad()
+                    """ (1) Update Generator networks: A2B and B2A """
 
-                # Identity loss
-                # G_B2A(A) should equal A if real A is fed
-                identity_image_A = netG_B2A(real_image_A)
-                loss_identity_A = identity_loss(identity_image_A, real_image_A) * 5.0
+                    # Zero the gradients
+                    optimizer_G_A2B.zero_grad()
+                    optimizer_G_B2A.zero_grad()
 
-                # G_A2B(B) should equal B if real B is fed
-                identity_image_B = netG_A2B(real_image_B)
-                loss_identity_B = identity_loss(identity_image_B, real_image_B) * 5.0
+                    # Identity loss
+                    # G_B2A(A) should equal A if real A is fed
+                    identity_image_A = netG_B2A(real_image_A)
+                    loss_identity_A = identity_loss(identity_image_A, real_image_A) * 5.0
 
-                # GAN loss: D_A(G_A(A))
-                fake_image_A = netG_B2A(real_image_B)
-                fake_output_A = netD_A(fake_image_A)
-                loss_GAN_B2A = adversarial_loss(fake_output_A, real_label)
-                # print("loss_GAN_B2A:", loss_GAN_B2A)
+                    # G_A2B(B) should equal B if real B is fed
+                    identity_image_B = netG_A2B(real_image_B)
+                    loss_identity_B = identity_loss(identity_image_B, real_image_B) * 5.0
 
-                # GAN loss: D_B(G_B(B))
-                fake_image_B = netG_A2B(real_image_A)
-                fake_output_B = netD_B(fake_image_B)
-                loss_GAN_A2B = adversarial_loss(fake_output_B, real_label)
-                # print("loss_GAN_A2B:", loss_GAN_A2B)
+                    # GAN loss: D_A(G_A(A))
+                    fake_image_A = netG_B2A(real_image_B)
+                    fake_output_A = netD_A(fake_image_A)
+                    loss_GAN_B2A = adversarial_loss(fake_output_A, real_label)
+                    # print("loss_GAN_B2A:", loss_GAN_B2A)
 
-                # Cycle loss
-                recovered_image_A = netG_B2A(fake_image_B)
-                loss_cycle_ABA = cycle_loss(recovered_image_A, real_image_A) * 10.0
-                # print("loss_cycle_ABA:", loss_cycle_ABA)
+                    # GAN loss: D_B(G_B(B))
+                    fake_image_B = netG_A2B(real_image_A)
+                    fake_output_B = netD_B(fake_image_B)
+                    loss_GAN_A2B = adversarial_loss(fake_output_B, real_label)
+                    # print("loss_GAN_A2B:", loss_GAN_A2B)
 
-                recovered_image_B = netG_A2B(fake_image_A)
-                loss_cycle_BAB = cycle_loss(recovered_image_B, real_image_B) * 10.0
-                # print("loss_cycle_BAB:", loss_cycle_BAB)
+                    # Cycle loss
+                    recovered_image_A = netG_B2A(fake_image_B)
+                    loss_cycle_ABA = cycle_loss(recovered_image_A, real_image_A) * 10.0
+                    # print("loss_cycle_ABA:", loss_cycle_ABA)
 
-                # Combined loss and calculate gradients
-                error_G = (
-                    loss_identity_A + loss_identity_B + loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB
-                )
+                    recovered_image_B = netG_A2B(fake_image_A)
+                    loss_cycle_BAB = cycle_loss(recovered_image_B, real_image_B) * 10.0
+                    # print("loss_cycle_BAB:", loss_cycle_BAB)
 
-                # Calculate gradients for G_A and G_B
-                error_G.backward()
-                # print("error_G:", error_G)
-
-                # Update the Generator networks
-                optimizer_G_A2B.step()
-                optimizer_G_B2A.step()
-
-                """ (2) Update Discriminator network: A """
-
-                # Set D_A gradients to zero
-                optimizer_D_A.zero_grad()
-
-                # Real A image loss
-                real_output_A = netD_A(real_image_A)
-                error_D_real_A = adversarial_loss(real_output_A, real_label)
-
-                # Fake A image loss
-                fake_image_A = fake_A_buffer.push_and_pop(fake_image_A)
-                fake_output_A = netD_A(fake_image_A.detach())
-                error_D_fake_A = adversarial_loss(fake_output_A, fake_label)
-
-                # Combined loss and calculate gradients
-                error_D_A = (error_D_real_A + error_D_fake_A) / 2
-
-                # Calculate gradients for D_A
-                error_D_A.backward()
-                # Update D_A weights
-                optimizer_D_A.step()
-
-                """ (3) Update Discriminator network: B """
-
-                # Set D_B gradients to zero
-                optimizer_D_B.zero_grad()
-
-                # Real B image loss
-                real_output_B = netD_B(real_image_B)
-                error_D_real_B = adversarial_loss(real_output_B, real_label)
-
-                # Fake B image loss
-                fake_image_B = fake_B_buffer.push_and_pop(fake_image_B)
-                fake_output_B = netD_B(fake_image_B.detach())
-                error_D_fake_B = adversarial_loss(fake_output_B, fake_label)
-
-                # Combined loss and calculate gradients
-                error_D_B = (error_D_real_B + error_D_fake_B) / 2
-
-                # Calculate gradients for D_B
-                error_D_B.backward()
-
-                # Update D_B weights
-                optimizer_D_B.step()
-
-                """ (4) Track progress and save data """
-
-                """ 
-                    # L_D(B) = Loss discriminator B
-                    # L_G(A2B) = Loss generator A2B
-                    # L_G(B2A) = Loss generator B2A
-                    # L_G_ID = Combined oentity loss generators A2B + B2A
-                    # L_G_GAN = Combined GAN loss generators A2B + B2A
-                    # L_G_CYCLE = Combined cycle consistency loss Generators A2B + B2A
-
-                """
-
-                # Print a progress bar in terminal
-                progress_bar.set_description(
-                    # L_D(A) = Loss discriminator A
-                    f"[{epoch + 1}/{run.num_epochs}][{i + 1}/{len(loader)}] "
-                    f"L_D(A): {error_D_A.item():.3f} "
-                    f"L_D(B): {error_D_B.item():.3f} | "
-                    f"L_G(A2B): {loss_GAN_A2B.item():.3f} "
-                    f"L_G(B2A): {loss_GAN_B2A.item():.3f} | "
-                    #
-                    f"L_G_ID: {(loss_identity_A + loss_identity_B).item():.3f} "
-                    f"L_G_GAN: {(loss_GAN_A2B + loss_GAN_B2A).item():.3f} "
-                    f"L_G_CYCLE: {(loss_cycle_ABA + loss_cycle_BAB).item():.3f} "
-                )
-
-                # Save the real/fake images
-                if i % PRINT_FREQ == 0:
-
-                    vutils.save_image(
-                        real_image_A, f"{DIR_OUTPUTS}/{RUN_PATH}/A/_real_samples.png", normalize=True,
-                    )
-                    vutils.save_image(
-                        real_image_B, f"{DIR_OUTPUTS}/{RUN_PATH}/B/_real_samples.png", normalize=True,
+                    # Combined loss and calculate gradients
+                    error_G = (
+                        loss_identity_A
+                        + loss_identity_B
+                        + loss_GAN_A2B
+                        + loss_GAN_B2A
+                        + loss_cycle_ABA
+                        + loss_cycle_BAB
                     )
 
-                    fake_image_A = 0.5 * (netG_B2A(real_image_B).data + 1.0)
-                    fake_image_B = 0.5 * (netG_A2B(real_image_A).data + 1.0)
+                    # Calculate gradients for G_A and G_B
+                    error_G.backward()
+                    # print("error_G:", error_G)
 
-                    # Save the real-time fake images A & B to a .png
-                    vutils.save_image(
-                        fake_image_A.detach(), f"{DIR_OUTPUTS}/{RUN_PATH}/A/_fake_samples.png", normalize=True,
-                    )
-                    vutils.save_image(
-                        fake_image_B.detach(), f"{DIR_OUTPUTS}/{RUN_PATH}/B/_fake_samples.png", normalize=True,
+                    # Update the Generator networks
+                    optimizer_G_A2B.step()
+                    optimizer_G_B2A.step()
+
+                    """ (2) Update Discriminator network: A """
+
+                    # Set D_A gradients to zero
+                    optimizer_D_A.zero_grad()
+
+                    # Real A image loss
+                    real_output_A = netD_A(real_image_A)
+                    error_D_real_A = adversarial_loss(real_output_A, real_label)
+
+                    # Fake A image loss
+                    fake_image_A = fake_A_buffer.push_and_pop(fake_image_A)
+                    fake_output_A = netD_A(fake_image_A.detach())
+                    error_D_fake_A = adversarial_loss(fake_output_A, fake_label)
+
+                    # Combined loss and calculate gradients
+                    error_D_A = (error_D_real_A + error_D_fake_A) / 2
+
+                    # Calculate gradients for D_A
+                    error_D_A.backward()
+                    # Update D_A weights
+                    optimizer_D_A.step()
+
+                    """ (3) Update Discriminator network: B """
+
+                    # Set D_B gradients to zero
+                    optimizer_D_B.zero_grad()
+
+                    # Real B image loss
+                    real_output_B = netD_B(real_image_B)
+                    error_D_real_B = adversarial_loss(real_output_B, real_label)
+
+                    # Fake B image loss
+                    fake_image_B = fake_B_buffer.push_and_pop(fake_image_B)
+                    fake_output_B = netD_B(fake_image_B.detach())
+                    error_D_fake_B = adversarial_loss(fake_output_B, fake_label)
+
+                    # Combined loss and calculate gradients
+                    error_D_B = (error_D_real_B + error_D_fake_B) / 2
+
+                    # Calculate gradients for D_B
+                    error_D_B.backward()
+
+                    # Update D_B weights
+                    optimizer_D_B.step()
+
+                    """ (4) Track progress and save data """
+
+                    """ 
+                        # L_D(A) = Loss discriminator A
+                        # L_D(B) = Loss discriminator B
+
+                        # L_G(A2B) = Loss generator A2B
+                        # L_G(B2A) = Loss generator B2A
+
+                        # L_G_ID = Combined oentity loss generators A2B + B2A
+                        # L_G_GAN = Combined GAN loss generators A2B + B2A
+                        # L_G_CYCLE = Combined cycle consistency loss Generators A2B + B2A
+
+                    """
+
+                    # Print a progress bar in terminal
+                    progress_bar.set_description(
+                        f"[{epoch + 1}/{run.num_epochs}][{i + 1}/{len(loader)}] "
+                        f"L_D(A): {error_D_A.item():.3f} "
+                        f"L_D(B): {error_D_B.item():.3f} | "
+                        #
+                        f"L_G(A2B): {loss_GAN_A2B.item():.3f} "
+                        f"L_G(B2A): {loss_GAN_B2A.item():.3f} | "
+                        #
+                        f"L_G_ID: {(loss_identity_A + loss_identity_B).item():.3f} "
+                        f"L_G_GAN: {(loss_GAN_A2B + loss_GAN_B2A).item():.3f} "
+                        f"L_G_CYCLE: {(loss_cycle_ABA + loss_cycle_BAB).item():.3f} "
                     )
 
-                    # Save the per-epoch fake images A & B to a .png
-                    vutils.save_image(
-                        fake_image_A.detach(),
-                        f"{DIR_OUTPUTS}/{RUN_PATH}/A/fake_samples_epoch_{epoch}.png",
-                        normalize=True,
-                    )
-                    vutils.save_image(
-                        fake_image_B.detach(),
-                        f"{DIR_OUTPUTS}/{RUN_PATH}/B/fake_samples_epoch_{epoch}.png",
-                        normalize=True,
-                    )
+                    # Save the real/fake images
+                    if i % PRINT_FREQ == 0:
 
-                    # Transform 4D tensor to 1D numpy array
-                    np_fake_image_A = real_image_A.reshape(1, -1).squeeze().cpu().numpy()
-                    np_fake_image_B = real_image_B.reshape(1, -1).squeeze().cpu().numpy()
+                        vutils.save_image(
+                            real_image_A, f"{DIR_OUTPUTS}/{RUN_PATH}/A/_real_samples.png", normalize=True,
+                        )
+                        vutils.save_image(
+                            real_image_B, f"{DIR_OUTPUTS}/{RUN_PATH}/B/_real_samples.png", normalize=True,
+                        )
 
-                    # Save the real-time fake image tensor to a .csv
-                    np.savetxt(f"{DIR_OUTPUTS}/{RUN_PATH}/A/_fake_samples.csv", np_fake_image_A, delimiter=",")
-                    np.savetxt(f"{DIR_OUTPUTS}/{RUN_PATH}/B/_fake_samples.csv", np_fake_image_B, delimiter=",")
+                        fake_image_A = 0.5 * (netG_B2A(real_image_B).data + 1.0)
+                        fake_image_B = 0.5 * (netG_A2B(real_image_A).data + 1.0)
+
+                        # Save the real-time fake images A & B to a .png
+                        vutils.save_image(
+                            fake_image_A.detach(), f"{DIR_OUTPUTS}/{RUN_PATH}/A/fake_samples.png", normalize=True,
+                        )
+                        vutils.save_image(
+                            fake_image_B.detach(), f"{DIR_OUTPUTS}/{RUN_PATH}/B/fake_samples.png", normalize=True,
+                        )
+
+                        # Save the per-epoch fake images A & B to a .png
+                        vutils.save_image(
+                            fake_image_A.detach(),
+                            f"{DIR_OUTPUTS}/{RUN_PATH}/A/epochs/fake_samples_epoch_{epoch}.png",
+                            normalize=True,
+                        )
+                        vutils.save_image(
+                            fake_image_B.detach(),
+                            f"{DIR_OUTPUTS}/{RUN_PATH}/B/epochs/fake_samples_epoch_{epoch}.png",
+                            normalize=True,
+                        )
+
+                        # Flatten the 4D tensor to a 1D numpy array
+                        np_fake_image_A = real_image_A.reshape(1, -1).squeeze().cpu().numpy()
+                        np_fake_image_B = real_image_B.reshape(1, -1).squeeze().cpu().numpy()
+
+                        # Save the real-time fake image tensor to a .csv for numerical-based debugging 
+                        np.savetxt(f"{DIR_OUTPUTS}/{RUN_PATH}/A/fake_samples.csv", np_fake_image_A, delimiter=",")
+                        np.savetxt(f"{DIR_OUTPUTS}/{RUN_PATH}/B/fake_samples.csv", np_fake_image_B, delimiter=",")
+
+                    # </end> for i, data in progress_bar:
+
+                except Exception as e:
+                    print(e)
+                    continue
 
                 # </end> for i, data in enumerate(loader):
-                pass
 
             # Check points, save weights after each epoch
             torch.save(netG_A2B.state_dict(), f"{DIR_WEIGHTS}/{RUN_PATH}/netG_A2B_epoch_{epoch}.pth")
@@ -373,10 +392,9 @@ def train() -> None:
             lr_scheduler_D_B.step()
 
             # Track the end of the epoch
-            # manager.end_epoch()
+            manager.end_epoch()
 
             # </end> for epoch in range(0, run.num_epochs):
-            pass
 
         # Save last check points, after every run
         torch.save(netG_A2B.state_dict(), f"{DIR_WEIGHTS}/{RUN_PATH}/netG_A2B.pth")
@@ -385,12 +403,11 @@ def train() -> None:
         torch.save(netD_B.state_dict(), f"{DIR_WEIGHTS}/{RUN_PATH}/netD_B.pth")
 
         # Track the end of the run
-        # manager.end_run()
-        
+        manager.end_run()
+
         # </end> for run in RunCycleBuilder.get_runs(params):
 
     # </end> def train():
-    pass
 
 
 # Testing function
@@ -413,8 +430,8 @@ def test(model_netG_A2B: str, model_netG_B2A: str) -> None:
         try:
             os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "A"))
             os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "B"))
-        except Exception as e:
-            pass
+        except OSError:
+                pass
 
         # Allow cuddn to look for the optimal set of algorithms to improve runtime speed
         cudnn.benchmark = True
@@ -463,26 +480,14 @@ if __name__ == "__main__":
 
     try:
 
-        syn = Synthesis()
-        
-        syn.load_models() 
-        syn.estimate_depth_v2() 
+        # syn = Synthesis()
+        # syn.load_models()
+        # syn.estimate_depth_v2()
 
-        """ Function (v1): estimate_depth() - [runs once, generally]
-
-        This function takes all single-view images (.jpg) in: "./synthesis_v{x}/assets/A", makes
-        a depth prediction using pre-trained (monodepth2) models and stores the predicted 
-        depth maps in: "./synthesis_v{x}/assets/B".
-
-        Note: This will eventually be bundled in a Synthesis class.
-             
-        """
-
-        # estimate_depth_v1() 
-
-        # train()
+        train()
 
         # test(model_netG_A2B="netG_A2B_epoch_4.pth", model_netG_B2A="netG_B2A_epoch_4.pth")
+
         pass
 
     except KeyboardInterrupt:
