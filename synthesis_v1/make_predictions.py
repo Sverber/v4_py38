@@ -13,18 +13,31 @@ import matplotlib.cm as cm
 
 from torchvision import transforms, datasets
 
-from synthesis.layers import disp_to_depth
-from synthesis.utils import download_model_if_doesnt_exist
-from synthesis.networks.depth_decoder import DepthDecoder
-from synthesis.networks.resnet_encoder import ResnetEncoder
+from synthesis_v1.layers import disp_to_depth
+from synthesis_v1.utils import download_model_if_doesnt_exist
+from synthesis_v1.networks.depth_decoder import DepthDecoder
+from synthesis_v1.networks.resnet_encoder import ResnetEncoder
 
 # Test function that produces a depth map
-def estimate_depth():
+def estimate_depth_v1():
 
     """ Insert documentation && rewrite function into cleaner code """
 
     # Clear terminal
     os.system("cls")
+
+    # Constants: list of all model names, just for quick-access
+    MODEL_LIST = [
+        "mono_640x192",
+        "stereo_640x192",
+        "mono+stereo_640x192",
+        "mono_no_pt_640x192",
+        "stereo_no_pt_640x192",
+        "mono+stereo_no_pt_640x192",
+        "mono_1024x320",
+        "stereo_1024x320",
+        "mono+stereo_1024x320",
+    ]
 
     # Constants: network model
     MODEL_NAME = f"mono_640x192"
@@ -33,9 +46,16 @@ def estimate_depth():
     # Constants: directories and image file type
     IMAGE_SOURCE = "A"
     IMAGE_TARGET = "B"
-    IMDIR_SOURCE = f"synthesis/assets/{IMAGE_SOURCE}"
-    IMDIR_TARGET = f"synthesis/assets/{IMAGE_TARGET}"
-    IMAGE_FTYPE = f".jpg"
+    IMDIR_SOURCE = f"synthesis_v1/assets/{IMAGE_SOURCE}"
+    IMDIR_TARGET = f"synthesis_v1/assets/{IMAGE_TARGET}"
+    IMAGE_FTYPE = f"png"
+
+    # Make required directories for the source and target images
+    try:
+        os.makedirs(os.path.join(IMDIR_SOURCE))
+        os.makedirs(os.path.join(IMDIR_TARGET))
+    except OSError:
+        pass
 
     # Constants: system
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -59,7 +79,7 @@ def estimate_depth():
     feed_width = loaded_dict_enc["width"]
     filtered_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in encoder.state_dict()}
     encoder.load_state_dict(filtered_dict_enc)
-    
+
     # Fit the encoder to our device
     encoder.to(DEVICE)
     encoder.eval()
@@ -90,10 +110,10 @@ def estimate_depth():
     with torch.no_grad():
         for idx, image_path in enumerate(paths):
 
-            # Make sure that no disparity predictions are made on disparity images 
+            # Make sure that no disparity predictions are made on disparity images
             # Obsolute now, since there are A and B folders.
             if image_path.endswith("_disp.jpg"):
-                continue 
+                continue
 
             # Load image and preprocess
             input_image = PIL.open(image_path).convert("RGB")
@@ -130,11 +150,13 @@ def estimate_depth():
             im = PIL.fromarray(colormapped_im)
 
             # Save the predicted disparity map
-            output_name = os.path.splitext(os.path.basename(image_path))[0]
-            name_dest_im = os.path.join(output_directory, "{}_disp.jpeg".format(output_name))
+            OUTPUT_NAME = os.path.splitext(os.path.basename(image_path))[0]
+            name_dest_im = os.path.join(output_directory, f"{OUTPUT_NAME}_depth.{IMAGE_FTYPE}")
             im.save(name_dest_im)
 
-            print("Processed {:d} of {:d} images - saved prediction to {}".format(idx + 1, len(paths), name_dest_im)
-            )
+            print("Processed {:d} of {:d} images - saved prediction to {}".format(idx + 1, len(paths), name_dest_im))
 
     pass
+
+
+print("--- You're running the wrong .py file ---")

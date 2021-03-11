@@ -30,7 +30,8 @@ from datetime import datetime
 from collections import OrderedDict
 from torch.utils.data import DataLoader, Dataset
 
-from synthesis.make_predictions import estimate_depth
+from synthesis_v1.make_predictions import estimate_depth_v1
+from synthesis_v2.Synthesis import Synthesis
 
 from utils.functions.weight_init import weights_init
 
@@ -129,8 +130,7 @@ def train() -> None:
             os.makedirs(os.path.join(DIR_OUTPUTS, RUN_PATH, "A"))
             os.makedirs(os.path.join(DIR_OUTPUTS, RUN_PATH, "B"))
             os.makedirs(os.path.join(DIR_WEIGHTS, RUN_PATH))
-        except Exception as e:
-            print(e)
+        except OSError:
             pass
 
         # Create Generator and Discriminator models
@@ -462,18 +462,26 @@ def test(model_netG_A2B: str, model_netG_B2A: str) -> None:
 if __name__ == "__main__":
 
     try:
-        """ {func}:     estimate_depth()
 
-        This function takes all single-view images (.jpg) in: "./synthesis/assets/A", makes
+        syn = Synthesis()
+        
+        syn.load_models() 
+        syn.estimate_depth_v2() 
+
+        """ Function (v1): estimate_depth() - [runs once, generally]
+
+        This function takes all single-view images (.jpg) in: "./synthesis_v{x}/assets/A", makes
         a depth prediction using pre-trained (monodepth2) models and stores the predicted 
-        depth maps in: "./synthesis/assets/B".
+        depth maps in: "./synthesis_v{x}/assets/B".
 
         Note: This will eventually be bundled in a Synthesis class.
              
         """
-        
-        estimate_depth() 
+
+        # estimate_depth_v1() 
+
         # train()
+
         # test(model_netG_A2B="netG_A2B_epoch_4.pth", model_netG_B2A="netG_B2A_epoch_4.pth")
         pass
 
