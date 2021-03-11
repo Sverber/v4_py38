@@ -32,7 +32,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from synthesis.Synthesis import Synthesis
 
-from utils.functions.weight_init import weights_init
+from utils.functions.initialize_weights import initialize_weights
 
 from utils.classes.DecayLR import DecayLR
 from utils.classes.ImageDataset import ImageDataset
@@ -134,7 +134,7 @@ def train() -> None:
             os.makedirs(os.path.join(DIR_OUTPUTS, RUN_PATH, "B", "epochs"))
             os.makedirs(os.path.join(DIR_WEIGHTS, RUN_PATH))
         except OSError:
-                pass
+            pass
 
         # Create Generator and Discriminator models
         netG_A2B = Generator().to(run.device)
@@ -143,10 +143,10 @@ def train() -> None:
         netD_B = Discriminator().to(run.device)
 
         # Apply weights
-        netG_A2B.apply(weights_init)
-        netG_B2A.apply(weights_init)
-        netD_A.apply(weights_init)
-        netD_B.apply(weights_init)
+        netG_A2B.apply(initialize_weights)
+        netG_B2A.apply(initialize_weights)
+        netD_A.apply(initialize_weights)
+        netD_B.apply(initialize_weights)
 
         # define loss function (adversarial_loss)
         cycle_loss = torch.nn.L1Loss().to(run.device)
@@ -366,7 +366,7 @@ def train() -> None:
                         np_fake_image_A = real_image_A.reshape(1, -1).squeeze().cpu().numpy()
                         np_fake_image_B = real_image_B.reshape(1, -1).squeeze().cpu().numpy()
 
-                        # Save the real-time fake image tensor to a .csv for numerical-based debugging 
+                        # Save the real-time fake image tensor to a .csv for numerical-based debugging
                         np.savetxt(f"{DIR_OUTPUTS}/{RUN_PATH}/A/fake_samples.csv", np_fake_image_A, delimiter=",")
                         np.savetxt(f"{DIR_OUTPUTS}/{RUN_PATH}/B/fake_samples.csv", np_fake_image_B, delimiter=",")
 
@@ -430,7 +430,7 @@ def test(model_netG_A2B: str, model_netG_B2A: str) -> None:
             os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "A"))
             os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "B"))
         except OSError:
-                pass
+            pass
 
         # Allow cuddn to look for the optimal set of algorithms to improve runtime speed
         cudnn.benchmark = True
@@ -479,9 +479,8 @@ if __name__ == "__main__":
 
     try:
 
-        # syn = Synthesis()
-        # syn.load_models()
-        # syn.estimate_depth_v2()
+        syn = Synthesis()
+        syn.predict_depth()
 
         train()
 

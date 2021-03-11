@@ -2,7 +2,7 @@ import torch
 
 
 # Custom weights initialization called on netG and netD
-def weights_init(m):
+def initialize_weights(m):
 
     classname = m.__class__.__name__
     if classname.find("Conv") != -1:
