@@ -30,8 +30,7 @@ from datetime import datetime
 from collections import OrderedDict
 from torch.utils.data import DataLoader, Dataset
 
-from synthesis_v1.make_predictions import estimate_depth_v1
-from synthesis_v2.Synthesis import Synthesis
+from synthesis.Synthesis import Synthesis
 
 from utils.functions.weight_init import weights_init
 
