@@ -157,6 +157,3 @@ def estimate_depth_v1():
             print("Processed {:d} of {:d} images - saved prediction to {}".format(idx + 1, len(paths), name_dest_im))
 
     pass
-
-
-print("--- You're running the wrong .py file ---")
