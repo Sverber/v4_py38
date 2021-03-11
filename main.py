@@ -30,6 +30,9 @@ from datetime import datetime
 from collections import OrderedDict
 from torch.utils.data import DataLoader, Dataset
 
+from synthesis_v1.make_predictions import estimate_depth_v1
+from synthesis_v2.Synthesis import Synthesis
+
 from utils.functions.weight_init import weights_init
 
 from utils.classes.DecayLR import DecayLR
@@ -39,8 +42,8 @@ from utils.classes.RunCycleBuilder import RunCycleBuilder
 from utils.classes.RunCycleManager import RunCycleManager
 from utils.classes.ImageDataset import ImageDataset
 
-from utils.models.Discriminator import Discriminator
-from utils.models.Generator import Generator
+from utils.models.cycle.Discriminator import Discriminator
+from utils.models.cycle.Generator import Generator
 
 
 # Clear terminal
@@ -75,8 +78,8 @@ PARAMETERS: OrderedDict = OrderedDict(
     num_workers=[4],
     learning_rate=[0.0002],
     batch_size=[1],
-    num_epochs=[100],
-    decay_epochs=[50],
+    num_epochs=[10],
+    decay_epochs=[5],
 )
 
 
@@ -127,8 +130,7 @@ def train() -> None:
             os.makedirs(os.path.join(DIR_OUTPUTS, RUN_PATH, "A"))
             os.makedirs(os.path.join(DIR_OUTPUTS, RUN_PATH, "B"))
             os.makedirs(os.path.join(DIR_WEIGHTS, RUN_PATH))
-        except Exception as e:
-            print(e)
+        except OSError:
             pass
 
         # Create Generator and Discriminator models
@@ -169,16 +171,16 @@ def train() -> None:
         loader = DataLoader(dataset_train, batch_size=run.batch_size, num_workers=run.num_workers, shuffle=run.shuffle)
 
         # Instantiate an instance of the RunManager class
-        manager = RunCycleManager()
+        # manager = RunCycleManager()
 
         # Track the start of the run
-        manager.begin_run(run, run.device, netG_A2B, netG_B2A, netD_A, netD_B, loader)
+        # manager.begin_run(run, run.device, netG_A2B, netG_B2A, netD_A, netD_B, loader)
 
         # Iterate through all the epochs
         for epoch in range(0, run.num_epochs):
             
             # Track the start of the epoch
-            manager.begin_epoch()
+            # manager.begin_epoch()
 
             # Create progress bar
             progress_bar = tqdm(enumerate(loader), total=len(loader))
@@ -371,7 +373,7 @@ def train() -> None:
             lr_scheduler_D_B.step()
 
             # Track the end of the epoch
-            manager.end_epoch()
+            # manager.end_epoch()
 
             # </end> for epoch in range(0, run.num_epochs):
             pass
@@ -383,7 +385,7 @@ def train() -> None:
         torch.save(netD_B.state_dict(), f"{DIR_WEIGHTS}/{RUN_PATH}/netD_B.pth")
 
         # Track the end of the run
-        manager.end_run()
+        # manager.end_run()
         
         # </end> for run in RunCycleBuilder.get_runs(params):
 
@@ -460,7 +462,26 @@ def test(model_netG_A2B: str, model_netG_B2A: str) -> None:
 if __name__ == "__main__":
 
     try:
-        train()
+
+        syn = Synthesis()
+        
+        syn.load_models() 
+        syn.estimate_depth_v2() 
+
+        """ Function (v1): estimate_depth() - [runs once, generally]
+
+        This function takes all single-view images (.jpg) in: "./synthesis_v{x}/assets/A", makes
+        a depth prediction using pre-trained (monodepth2) models and stores the predicted 
+        depth maps in: "./synthesis_v{x}/assets/B".
+
+        Note: This will eventually be bundled in a Synthesis class.
+             
+        """
+
+        # estimate_depth_v1() 
+
+        # train()
+
         # test(model_netG_A2B="netG_A2B_epoch_4.pth", model_netG_B2A="netG_B2A_epoch_4.pth")
         pass
 
