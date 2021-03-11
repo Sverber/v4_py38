@@ -11,13 +11,9 @@
 dataset/*
 outputs/*
 results/*
-runs/*
-synthesis_v1/assets/A/*
-synthesis_v1/assets/B/*
-synthesis_v1/models/*
-synthesis_v2/assets/A/*
-synthesis_v2/assets/B/*
-synthesis_v2/models/*
+synthesis/assets/A/*
+synthesis/assets/B/*
+synthesis/models/*
 weights/*
 
 # Keep the folders directories
@@ -25,8 +21,6 @@ weights/*
 !outputs/.gitkeep 
 !results/.gitkeep 
 !runs/.gitkeep
-!synthesis_v1/assets/.gitkeep 
-!synthesis_v1/models/.gitkeep 
-!synthesis_v2/assets/.gitkeep 
-!synthesis_v2/models/.gitkeep 
+!synthesis/assets/.gitkeep 
+!synthesis/models/.gitkeep 
 !weights/.gitkeep 

@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-from utils.models.ResidualBlock import ResidualBlock
+from .ResidualBlock import ResidualBlock
 
 
 class Generator(nn.Module):

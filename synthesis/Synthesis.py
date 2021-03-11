@@ -22,10 +22,10 @@ from torchvision import transforms, datasets
 
 from six.moves import urllib
 
-from synthesis_v2.layers import disp_to_depth
-from synthesis_v2.utils import download_model_if_doesnt_exist
-from synthesis_v2.networks.depth_decoder import DepthDecoder
-from synthesis_v2.networks.resnet_encoder import ResnetEncoder
+from synthesis.layers import disp_to_depth
+from synthesis.utils import download_model_if_doesnt_exist
+from synthesis.networks.depth_decoder import DepthDecoder
+from synthesis.networks.resnet_encoder import ResnetEncoder
 
 
 def resnet_multiimage_input(num_layers, pretrained=False, num_input_images=1):
@@ -103,7 +103,7 @@ class Image:
         self,
         imdir_source: str = f"mono_640x192",
         imdir_target: str = f"mono_640x192",
-        image_ftype: str = f"synthesis_v2/models",
+        image_ftype: str = f"synthesis/models",
         path: str = None,
         feed_height: int = None,
         feed_width: int = None,
@@ -123,8 +123,8 @@ class Model:
     def __init__(
         self,
         name: str = f"mono_640x192",
-        root: str = f"synthesis_v2/models",
-        path: str = f"synthesis_v2/models/mono_640x192",
+        root: str = f"synthesis/models",
+        path: str = f"synthesis/models/mono_640x192",
         feed_height: int = None,
         feed_width: int = None,
     ):
@@ -143,14 +143,12 @@ class Synthesis:
     def __init__(
         self,
         model_name: str = f"mono_640x192",
-        model_root: str = f"synthesis_v2/models",
-        imdir_source: str = f"synthesis_v2/assets/A",
-        imdir_target: str = f"synthesis_v2/assets/B",
+        model_root: str = f"synthesis/models",
+        imdir_source: str = f"synthesis/assets/A",
+        imdir_target: str = f"synthesis/assets/B",
         image_ftype: str = f"png",
         device: str = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     ):
-
-        """ [TO-DO] Fix those strings with str.format(x) """
 
         # Constants: system
         self.DEVICE = device
@@ -178,58 +176,11 @@ class Synthesis:
         # Make required directories for the source and target images
         self._makedirs()
         self._download_models_if_none()
+        self._load_models()
 
     """ Public methods """
 
-    def load_models(self) -> None:
-
-        """ Insert documentation """
-
-        # Get encoder- and decoder paths
-        image_encoder_path = os.path.join(self.model.PATH, "encoder.pth")
-        depth_decoder_path = os.path.join(self.model.PATH, "depth.pth")
-
-        # Instantiate a encoder class and a decoder class
-        self.encoder = ResnetEncoder(18, False)
-        self.decoder = DepthDecoder(num_ch_enc=self.encoder.num_ch_enc, scales=range(4))
-
-        # Load them into a torch pickle (yuck!)
-        loaded_dict_enc = torch.load(image_encoder_path, map_location=self.DEVICE)
-        loaded_dict_dec = torch.load(depth_decoder_path, map_location=self.DEVICE)
-
-        # Extract the height and width of image that this model was trained with
-        self.model.FEED_HEIGHT = loaded_dict_enc["height"]
-        self.model.FEED_WIDTH = loaded_dict_enc["width"]
-
-        # Make a dictionary of the parameters
-        filter_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in self.encoder.state_dict()}
-        loaded_dict_dec = torch.load(depth_decoder_path, map_location=self.DEVICE)
-
-        # Load both dictionaries
-        self.encoder.load_state_dict(filter_dict_enc)
-        self.decoder.load_state_dict(loaded_dict_dec)
-
-        # Fit both the encoder- and decoder to our device
-        self.encoder.to(self.DEVICE).eval()
-        self.decoder.to(self.DEVICE).eval()
-
-        # When the source is a single image, set path and output directory
-        if os.path.isfile(self.image.SOURCE_DIR):
-            self.paths = [self.image.SOURCE_DIR]
-            self.output_directory = os.path.dirname(self.image.TARGET_DIR)
-
-        # When the source is an image folder, set path and output directory
-        elif os.path.isdir(self.image.SOURCE_DIR):
-            self.paths = glob.glob(os.path.join(self.image.SOURCE_DIR, f"*.{self.image.FILE_TYPE}"))
-            self.output_directory = self.image.TARGET_DIR
-
-        else:
-            raise Exception("Can't find image source path: {self.image.SOURCE_DIR}")
-
-        print(f"Estimating the depth of {len(self.paths)} images")
-        pass
-
-    def estimate_depth_v2(self) -> None:
+    def predict_depth(self) -> None:
 
         """ Insert documentation """
 
@@ -277,16 +228,6 @@ class Synthesis:
         pass
 
     """ Private methods """
-
-    def _makedirs(self) -> None:
-
-        """ Create required source- and target folders, if none exist """
-
-        try:
-            os.makedirs(os.path.join(self.image.SOURCE_DIR))
-            os.makedirs(os.path.join(self.image.TARGET_DIR))
-        except OSError:
-            pass
 
     def _download_models_if_none(self) -> None:
 
@@ -366,6 +307,64 @@ class Synthesis:
 
             print("Model unzipped to {}".format(self.model.PATH))
 
+        pass
+
+    def _makedirs(self) -> None:
+
+        """ Create required source- and target folders, if none exist """
+
+        try:
+            os.makedirs(os.path.join(self.image.SOURCE_DIR))
+            os.makedirs(os.path.join(self.image.TARGET_DIR))
+        except OSError:
+            pass
+
+    def _load_models(self) -> None:
+
+        """ Insert documentation """
+
+        # Get encoder- and decoder paths
+        image_encoder_path = os.path.join(self.model.PATH, "encoder.pth")
+        depth_decoder_path = os.path.join(self.model.PATH, "depth.pth")
+
+        # Instantiate a encoder class and a decoder class
+        self.encoder = ResnetEncoder(18, False)
+        self.decoder = DepthDecoder(num_ch_enc=self.encoder.num_ch_enc, scales=range(4))
+
+        # Load them into a torch pickle (yuck!)
+        loaded_dict_enc = torch.load(image_encoder_path, map_location=self.DEVICE)
+        loaded_dict_dec = torch.load(depth_decoder_path, map_location=self.DEVICE)
+
+        # Extract the height and width of image that this model was trained with
+        self.model.FEED_HEIGHT = loaded_dict_enc["height"]
+        self.model.FEED_WIDTH = loaded_dict_enc["width"]
+
+        # Make a dictionary of the parameters
+        filter_dict_enc = {k: v for k, v in loaded_dict_enc.items() if k in self.encoder.state_dict()}
+        loaded_dict_dec = torch.load(depth_decoder_path, map_location=self.DEVICE)
+
+        # Load both dictionaries
+        self.encoder.load_state_dict(filter_dict_enc)
+        self.decoder.load_state_dict(loaded_dict_dec)
+
+        # Fit both the encoder- and decoder to our device
+        self.encoder.to(self.DEVICE).eval()
+        self.decoder.to(self.DEVICE).eval()
+
+        # When the source is a single image, set path and output directory
+        if os.path.isfile(self.image.SOURCE_DIR):
+            self.paths = [self.image.SOURCE_DIR]
+            self.output_directory = os.path.dirname(self.image.TARGET_DIR)
+
+        # When the source is an image folder, set path and output directory
+        elif os.path.isdir(self.image.SOURCE_DIR):
+            self.paths = glob.glob(os.path.join(self.image.SOURCE_DIR, f"*.{self.image.FILE_TYPE}"))
+            self.output_directory = self.image.TARGET_DIR
+
+        else:
+            raise Exception("Can't find image source path: {self.image.SOURCE_DIR}")
+
+        print(f"Estimating the depth of {len(self.paths)} images")
         pass
 
     def __sizeof__(self) -> int:
