@@ -2,29 +2,29 @@
 
 *This file contains general notes and information that deem important for understanding and using this program.*
 
-## ENVIRONMENT
+## Environment
 
 * Anaconda environment 
 * Python 3.8.5 64-bit
 
-## PACKAGES
+## Package
 
 * Add packages..
 
-## DATASETS
+## Datasets
 
-* ### NAME_DATASET: *horse2zebra_000_999*       
-    * Contains 1000 training images per class
-    * Contains 120 test images per class
-    * Original image size is 256 x 256 px
-        * Resize to 61%: (156, 156) px
-        * Rncrop to 82%: (128, 128) px
+* ### **horse2zebra_000_999**       
+    * Contains 1000 training images per class.
+    * Contains 120 test images per class.
+    * Original image size is 256 x 256 pixels.
+    * Resize to 61%: (156, 156) pixels.
+    * Rncrop to 82%: (128, 128) pixels.
 
-* ### NAME_DATASET: *kitti_synthesized_000_999* 
+* ### **kitti_synthesized_000_999** 
     * Contains 1000 training images per class.
     * Contains 0 test images per class.
     * Original image size is 1216 x 352 pixels.
-        * Resize to 10%: (122, 35) pixels.
-        * Rncrop to 82%: (100, 28) pixels.
+    * Resize to 10%: (122, 35) pixels.
+    * Rncrop to 82%: (100, 28) pixels.
 
 """

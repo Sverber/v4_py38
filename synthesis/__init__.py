@@ -1,2 +1,2 @@
-from .layers import Synthesis
+from .layers import *
 from .Synthesis import Synthesis

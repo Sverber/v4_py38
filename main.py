@@ -10,7 +10,6 @@ import math
 import random
 import argparse
 import itertools
-import unicodedata
 import numpy as np
 import pandas as pd
 
@@ -47,6 +46,7 @@ from utils.models.cycle.Generator import Generator
 
 # Clear terminal
 os.system("cls")
+print("Hello there!")
 
 
 # Constants: required directories
@@ -102,10 +102,10 @@ dataset_train: ImageDataset = ImageDataset(
 )
 
 
-# Dataset for testing
-dataset_test: ImageDataset = ImageDataset(
-    root=f"./{DIR_DATASET}/{NAME_DATASET}", mode="test", unaligned=True, transform=dataset_transforms
-)
+# # Dataset for testing
+# dataset_test: ImageDataset = ImageDataset(
+#     root=f"./{DIR_DATASET}/{NAME_DATASET}", mode="test", unaligned=True, transform=dataset_transforms
+# )
 
 
 # Training function
@@ -482,9 +482,10 @@ if __name__ == "__main__":
         syn = Synthesis()
         syn.predict_depth()
 
-        train()
+        print(syn)
 
-        # test(model_netG_A2B="netG_A2B_epoch_4.pth", model_netG_B2A="netG_B2A_epoch_4.pth")
+        train()
+        # test()
 
         pass
 
