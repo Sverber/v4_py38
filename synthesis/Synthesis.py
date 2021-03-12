@@ -27,6 +27,8 @@ class Synthesis:
 
     def __init__(
         self,
+        mode: str = f"train",
+        file_type: str = f"png",
         model_root: str = f"synthesis/models",
         model_name: str = f"mono_640x192",
         device: str = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
@@ -34,13 +36,14 @@ class Synthesis:
 
         # Constants: system and model
         self.DEVICE = device
+        self.MODE = mode
         self.MODEL_ROOT = model_root
         self.MODEL_NAME = model_name
 
-        # Constants: assets
-        self.SOURCE_DIR = "synthesis/assets/train/A"
-        self.TARGET_DIR = "synthesis/assets/train/B"
-        self.FILE_TYPE = "png"
+        # Constants: assets dirs and file type
+        self.SOURCE_DIR = f"synthesis/assets/{mode}/A"
+        self.TARGET_DIR = f"synthesis/assets/{mode}/B"
+        self.FILE_TYPE = file_type
 
         # Networks
         self.encoder = None
@@ -112,9 +115,9 @@ class Synthesis:
 
     def __makedirs(self) -> None:
 
+        """ Insert documentation """
+
         try:
-            os.makedirs("synthesis/assets/test/A")
-            os.makedirs("synthesis/assets/test/B")
             os.makedirs(self.SOURCE_DIR)
             os.makedirs(self.TARGET_DIR)
         except OSError:
@@ -254,10 +257,10 @@ class Synthesis:
 
         """ Insert documentation """
 
-        return f" \n\
+        return f"<class>\n\
         Synthesis(\n\
-            model_name={self.MODEL_NAME},\n   \
-            model_root={self.MODEL_ROOT},\n   \
-            num_assets={len(self.paths)},\n   \
+            model_name = {self.MODEL_NAME},\n\
+            model_root = {self.MODEL_ROOT},\n\
+            num_assets = {len(self.paths)},\n\
         )\n"
 

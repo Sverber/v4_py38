@@ -481,10 +481,11 @@ if __name__ == "__main__":
 
         syn = Synthesis()
         syn.predict_depth()
-
         print(syn)
 
-        train()
+        """ [TO-DO NEXT]: """
+
+        # train()
         # test()
 
         pass
