@@ -132,7 +132,6 @@ class RunCycleManager:
         self.run.data.append(results)
 
         if print_df:
-            os.system("cls")
             pprint.pprint(
                 pd.DataFrame.from_dict(self.run.data, orient="columns").sort_values(
                     "accuracy", ascending=False

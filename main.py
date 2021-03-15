@@ -1,33 +1,25 @@
 #!/usr/bin/env python
 from __future__ import absolute_import, division, print_function
-from multiprocessing import Process, freeze_support
 
 import os
 import sys
-import glob
 import time
-import math
-import random
-import argparse
-import itertools
 import numpy as np
-import pandas as pd
 
 import torch
 import torch.backends.cudnn as cudnn
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.utils as vutils
-import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
 from PIL import Image
 from tqdm import tqdm
 from datetime import datetime
 from collections import OrderedDict
-from torch.utils.data import DataLoader, Dataset
+
+from torch.utils.data.dataloader import DataLoader
+from torch.utils.data.dataset import Dataset
 
 from synthesis.Synthesis import Synthesis
 
@@ -78,14 +70,14 @@ PARAMETERS: OrderedDict = OrderedDict(
     shuffle=[True],
     num_workers=[4],
     learning_rate=[0.0002],
-    batch_size=[6],
+    batch_size=[1],
     num_epochs=[100],
     decay_epochs=[50],
 )
 
 
-# Transformations on dataset
-dataset_transforms: transforms = transforms.Compose(
+# Transformations on the datasets
+TRANSFORMATIONS: transforms = transforms.Compose(
     [
         transforms.Resize(IMAGE_SIZE, Image.BICUBIC),
         transforms.RandomCrop(RANDM_CROP),
@@ -96,22 +88,29 @@ dataset_transforms: transforms = transforms.Compose(
 )
 
 
-# Dataset for training
-dataset_train: ImageDataset = ImageDataset(
-    root=f"./{DIR_DATASET}/{NAME_DATASET}", mode="train", unaligned=True, transform=dataset_transforms
-)
+# Load dataset
+def load_dataset(mode: str = "train", verbose: bool = True) -> ImageDataset:
 
+    # Print start message if verbose is set to True
+    verbose is True if print(f"\nGathering the {mode} dataset.") else None
 
-# # Dataset for testing
-# dataset_test: ImageDataset = ImageDataset(
-#     root=f"./{DIR_DATASET}/{NAME_DATASET}", mode="test", unaligned=True, transform=dataset_transforms
-# )
+    # Gather dataset
+    dataset: ImageDataset = ImageDataset(
+        root=f"./{DIR_DATASET}/{NAME_DATASET}", mode=mode, unaligned=True, transform=TRANSFORMATIONS
+    )
+
+    # Print completion message if verbose is set to True
+    verbose is True if print(f"Loaded train data, length: {len(dataset)}.") else None
+
+    return dataset
 
 
 # Training function
-def train() -> None:
+def train(dataset: ImageDataset) -> None:
 
     """ Insert documentation """
+
+    print(f"Start training")
 
     # Iterate over every run, based on the configurated params
     for run in RunCycleBuilder.get_runs(PARAMETERS):
@@ -171,7 +170,9 @@ def train() -> None:
         fake_B_buffer = ReplayBuffer()
 
         # Dataloader
-        loader = DataLoader(dataset_train, batch_size=run.batch_size, num_workers=run.num_workers, shuffle=run.shuffle)
+        loader = DataLoader(
+            dataset=dataset, batch_size=run.batch_size, num_workers=run.num_workers, shuffle=run.shuffle
+        )
 
         # Instantiate an instance of the RunManager class
         manager = RunCycleManager()
@@ -374,7 +375,7 @@ def train() -> None:
 
                 except Exception as e:
                     print(e)
-                    continue
+                    pass
 
                 # </end> for i, data in enumerate(loader):
 
@@ -410,7 +411,7 @@ def train() -> None:
 
 
 # Testing function
-def test(model_netG_A2B: str, model_netG_B2A: str) -> None:
+def test(dataset: ImageDataset, path_to_folder: str, model_netG_A2B: str, model_netG_B2A: str) -> None:
 
     """ Insert documentation """
 
@@ -436,15 +437,17 @@ def test(model_netG_A2B: str, model_netG_B2A: str) -> None:
         cudnn.benchmark = True
 
         # Dataloader
-        loader = DataLoader(dataset_test, batch_size=run.batch_size, num_workers=run.num_workers, shuffle=run.shuffle)
+        loader = DataLoader(
+            dataset=dataset, batch_size=run.batch_size, num_workers=run.num_workers, shuffle=run.shuffle
+        )
 
         # create model
         netG_A2B = Generator().to(run.device)
         netG_B2A = Generator().to(run.device)
 
         # Load state dicts
-        netG_A2B.load_state_dict(torch.load(os.path.join(DIR_WEIGHTS, str(NAME_DATASET), model_netG_A2B)))
-        netG_B2A.load_state_dict(torch.load(os.path.join(DIR_WEIGHTS, str(NAME_DATASET), model_netG_B2A)))
+        netG_A2B.load_state_dict(torch.load(os.path.join(str(path_to_folder), model_netG_A2B)))
+        netG_B2A.load_state_dict(torch.load(os.path.join(str(path_to_folder), model_netG_B2A)))
 
         # Set model mode
         netG_A2B.eval()
@@ -479,14 +482,20 @@ if __name__ == "__main__":
 
     try:
 
-        syn = Synthesis()
-        syn.predict_depth()
-        print(syn)
+        # syn = Synthesis(mode="test")
+        # syn.predict_depth()
 
-        """ [TO-DO NEXT]: """
+        # dataset_train = load_dataset(Mode="train", verbose=True)
+        # train(dataset=dataset_train)
 
-        # train()
-        # test()
+        dataset_test = load_dataset(mode="test", verbose=True)
+
+        # test(
+        #     dataset=dataset_test,
+        #     path_to_folder=f"{DIR_WEIGHTS}/kitti_synthesized_000_999/2021-03-11/15.17.59___EP100_DE50_LR0.0002_BS6",
+        #     model_netG_A2B=f"netG_A2B_epoch_37.pth",
+        #     model_netG_B2A=f"netG_B2A_epoch_37.pth",
+        # )
 
         pass
 

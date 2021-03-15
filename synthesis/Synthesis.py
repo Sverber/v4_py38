@@ -14,7 +14,7 @@ import matplotlib.cm as cm
 
 from six.moves import urllib
 
-from torchvision import transforms, datasets
+from torchvision import transforms
 
 # from .layers import disp_to_depth
 from .networks.depth_decoder import DepthDecoder
@@ -110,6 +110,7 @@ class Synthesis:
                 im.save(name_dest_im)
 
                 print(f"Processed {idx + 1} of {len(self.paths)} images - saved prediction to: {name_dest_im}")
+        pass
 
     """ Private methods """
 
@@ -259,6 +260,7 @@ class Synthesis:
 
         return f"<class>\n\
         Synthesis(\n\
+            file_type = .{self.MODEL_NAME},\n\
             model_name = {self.MODEL_NAME},\n\
             model_root = {self.MODEL_ROOT},\n\
             num_assets = {len(self.paths)},\n\
