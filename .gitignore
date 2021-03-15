@@ -2,17 +2,16 @@
 **/__pycache__
 **/.vscode  
 
-# Ignore all images to avoid uploading images accidently
-**/.jpeg
-**/.jpg 
-**/.png
+# Ignore all images to avoid uploading images accidently | Keep .jpg like this: !/results/*.jpg
+**/*.jpg
+**/*.png
 
 # Ignore dataset folders directories content
 dataset/*
 outputs/*
 results/*
-synthesis/assets/A/*
-synthesis/assets/B/*
+synthesis/assets/**/A/*
+synthesis/assets/**/B/*
 synthesis/models/*
 weights/*
 
