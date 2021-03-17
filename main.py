@@ -36,8 +36,7 @@ from utils.models.cycle.Generators import Generator, OneToOneGenerator, OneToMul
 
 
 # Clear terminal
-# os.system("cls")
-# print("Hello there!")
+os.system("cls")
 
 
 # Constants: required directories
@@ -60,7 +59,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Constants: parameters
 # IMAGE_SIZE = (122, 35) # kitti_synthesized_000_999
-IMAGE_SIZE = (176, 69) # DrivingStereo_demo_images
+IMAGE_SIZE = (176, 79) # DrivingStereo_demo_images
 RATIO_CROP = 0.82
 RANDM_CROP = (int(IMAGE_SIZE[0] * RATIO_CROP), int(IMAGE_SIZE[1] * RATIO_CROP))
 PRINT_FREQ = 5
@@ -73,8 +72,8 @@ PARAMETERS: OrderedDict = OrderedDict(
     num_workers=[4],
     learning_rate=[0.0002],
     batch_size=[1],
-    num_epochs=[2],
-    decay_epochs=[1],
+    num_epochs=[100],
+    decay_epochs=[50],
 )
 
 
@@ -194,13 +193,12 @@ def train(dataset: DisparityDataset) -> None:
 
         """ Insert a save params function as .txt file / incorporate in RunCycleManager """
 
-        # Make required directories for storing the training output and model weights
+        # Make required directories for storing the training output
         try:
             os.makedirs(os.path.join(DIR_OUTPUTS, RUN_PATH, "A"))
             os.makedirs(os.path.join(DIR_OUTPUTS, RUN_PATH, "B"))
             os.makedirs(os.path.join(DIR_OUTPUTS, RUN_PATH, "A", "epochs"))
             os.makedirs(os.path.join(DIR_OUTPUTS, RUN_PATH, "B", "epochs"))
-            os.makedirs(os.path.join(DIR_WEIGHTS, RUN_PATH))
         except OSError:
             pass
 
@@ -441,6 +439,13 @@ def train(dataset: DisparityDataset) -> None:
                     pass
 
                 # </end> for i, data in progress_bar:
+
+            # Make required directories for storing the model weights
+            try:
+
+                os.makedirs(os.path.join(DIR_WEIGHTS, RUN_PATH))
+            except OSError:
+                pass
 
             # Check points, save weights after each epoch
             torch.save(netG_A2B.state_dict(), f"{DIR_WEIGHTS}/{RUN_PATH}/netG_A2B_epoch_{epoch}.pth")
