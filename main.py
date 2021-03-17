@@ -26,19 +26,18 @@ from synthesis.Synthesis import Synthesis
 from utils.functions.initialize_weights import initialize_weights
 
 from utils.classes.DecayLR import DecayLR
-from utils.classes.ImageDataset import ImageDataset
 from utils.classes.ReplayBuffer import ReplayBuffer
 from utils.classes.RunCycleBuilder import RunCycleBuilder
 from utils.classes.RunCycleManager import RunCycleManager
-from utils.classes.ImageDataset import ImageDataset
+from utils.classes.DisparityDataset import DisparityDataset
 
 from utils.models.cycle.Discriminator import Discriminator
-from utils.models.cycle.Generator import Generator
+from utils.models.cycle.Generators import Generator, OneToOneGenerator, OneToMultiGenerator, MultiToOneGenerator
 
 
 # Clear terminal
-os.system("cls")
-print("Hello there!")
+# os.system("cls")
+# print("Hello there!")
 
 
 # Constants: required directories
@@ -50,7 +49,9 @@ DIR_WEIGHTS = f"./weights"
 
 # Constants: dataset name
 # NAME_DATASET = f"horse2zebra_000_999"
-NAME_DATASET = f"kitti_synthesized_000_999"
+# NAME_DATASET = f"kitti_synthesized_000_999"
+# NAME_DATASET = f"stereo_test"
+NAME_DATASET = f"DrivingStereo_demo_images"
 
 
 # Constants: system
@@ -58,10 +59,11 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # Constants: parameters
-IMAGE_SIZE = (122, 35)
+# IMAGE_SIZE = (122, 35) # kitti_synthesized_000_999
+IMAGE_SIZE = (176, 69) # DrivingStereo_demo_images
 RATIO_CROP = 0.82
 RANDM_CROP = (int(IMAGE_SIZE[0] * RATIO_CROP), int(IMAGE_SIZE[1] * RATIO_CROP))
-PRINT_FREQ = 20
+PRINT_FREQ = 5
 
 
 # Configure network parameters
@@ -71,8 +73,8 @@ PARAMETERS: OrderedDict = OrderedDict(
     num_workers=[4],
     learning_rate=[0.0002],
     batch_size=[1],
-    num_epochs=[100],
-    decay_epochs=[50],
+    num_epochs=[2],
+    decay_epochs=[1],
 )
 
 
@@ -89,14 +91,14 @@ TRANSFORMATIONS: transforms = transforms.Compose(
 
 
 # Load dataset
-def load_dataset(mode: str = "train", verbose: bool = True) -> ImageDataset:
+def load_dataset(mode: str = "train", verbose: bool = True) -> DisparityDataset:
 
     # Print start message if verbose is set to True
-    verbose is True if print(f"\nGathering the {mode} dataset.") else None
+    verbose is True if print(f"Gathering the {mode} dataset.") else None
 
     # Gather dataset
-    dataset: ImageDataset = ImageDataset(
-        root=f"./{DIR_DATASET}/{NAME_DATASET}", mode=mode, unaligned=True, transform=TRANSFORMATIONS
+    dataset: DisparityDataset = DisparityDataset(
+        root=f"./{DIR_DATASET}/{NAME_DATASET}", mode=mode, transform=TRANSFORMATIONS
     )
 
     # Print completion message if verbose is set to True
@@ -105,8 +107,75 @@ def load_dataset(mode: str = "train", verbose: bool = True) -> ImageDataset:
     return dataset
 
 
+# Testing function
+def test(dataset: DisparityDataset, path_to_folder: str, model_netG_A2B: str, model_netG_B2A: str) -> None:
+
+    """ Insert documentation """
+
+    # Iterate over every run, based on the configurated params
+    for run in RunCycleBuilder.get_runs(PARAMETERS):
+
+        # Store today's date in string format
+        TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
+        TODAY_TIME = datetime.today().strftime("%H.%M.%S")
+
+        # Create a unique name for this run
+        RUN_NAME = f"{TODAY_TIME}___EP{run.num_epochs}_DE{run.decay_epochs}_LR{run.learning_rate}_BS{run.batch_size}"
+        RUN_PATH = f"{NAME_DATASET}/{TODAY_DATE}/{RUN_NAME}"
+
+        # Make required directories for testing
+        try:
+            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "A"))
+            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "B"))
+        except OSError:
+            pass
+
+        # Allow cuddn to look for the optimal set of algorithms to improve runtime speed
+        cudnn.benchmark = True
+
+        # Dataloader
+        loader = DataLoader(
+            dataset=dataset, batch_size=run.batch_size, num_workers=run.num_workers, shuffle=run.shuffle
+        )
+
+        # create model
+        netG_A2B = MultiToOneGenerator().to(run.device)
+        netG_B2A = OneToMultiGenerator().to(run.device)
+
+        # Load state dicts
+        netG_A2B.load_state_dict(torch.load(os.path.join(str(path_to_folder), model_netG_A2B)))
+        netG_B2A.load_state_dict(torch.load(os.path.join(str(path_to_folder), model_netG_B2A)))
+
+        # Set model mode
+        netG_A2B.eval()
+        netG_B2A.eval()
+
+        # Create progress bar
+        progress_bar = tqdm(enumerate(loader), total=len(loader))
+
+        # Iterate over the data
+        for i, data in progress_bar:
+            # get batch size data
+            real_images_A = data["A"].to(run.device)
+            real_images_B = data["B"].to(run.device)
+
+            # Generate output
+            fake_image_A = 0.5 * (netG_B2A(real_images_B).data + 1.0)
+            fake_image_B = 0.5 * (netG_A2B(real_images_A).data + 1.0)
+
+            # Save image files
+            vutils.save_image(fake_image_A.detach(), f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}.png", normalize=True)
+            vutils.save_image(fake_image_B.detach(), f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}.png", normalize=True)
+
+            # Print a progress bar in terminal
+            progress_bar.set_description(f"Process images {i + 1} of {len(loader)}")
+
+    # </end> def test():
+    pass
+
+
 # Training function
-def train(dataset: ImageDataset) -> None:
+def train(dataset: DisparityDataset) -> None:
 
     """ Insert documentation """
 
@@ -136,8 +205,8 @@ def train(dataset: ImageDataset) -> None:
             pass
 
         # Create Generator and Discriminator models
-        netG_A2B = Generator().to(run.device)
-        netG_B2A = Generator().to(run.device)
+        netG_A2B = OneToMultiGenerator().to(run.device)
+        netG_B2A = MultiToOneGenerator().to(run.device)
         netD_A = Discriminator().to(run.device)
         netD_B = Discriminator().to(run.device)
 
@@ -153,8 +222,8 @@ def train(dataset: ImageDataset) -> None:
         adversarial_loss = torch.nn.MSELoss().to(run.device)
 
         # Optimizers
-        optimizer_G_A2B = torch.optim.Adam(netG_A2B.parameters(), lr=run.learning_rate, betas=(0.5, 0.999),)
-        optimizer_G_B2A = torch.optim.Adam(netG_B2A.parameters(), lr=run.learning_rate, betas=(0.5, 0.999),)
+        optimizer_G_A2B = torch.optim.Adam(netG_A2B.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
+        optimizer_G_B2A = torch.optim.Adam(netG_B2A.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
         optimizer_D_A = torch.optim.Adam(netD_A.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
         optimizer_D_B = torch.optim.Adam(netD_B.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
 
@@ -195,8 +264,12 @@ def train(dataset: ImageDataset) -> None:
                 try:
 
                     # Get image A and image B
-                    real_image_A = data["A"].to(run.device)
+                    real_image_A_left = data["A_left"].to(run.device)
+                    real_image_A_right = data["A_right"].to(run.device)
                     real_image_B = data["B"].to(run.device)
+
+                    real_image_A = torch.cat((real_image_A_left, real_image_A_right), dim=-1)
+                    real_image_B = real_image_B
 
                     # Real data label is 1, fake data label is 0.
                     real_label = torch.full((run.batch_size, 1), 1, device=run.device, dtype=torch.float32)
@@ -240,12 +313,7 @@ def train(dataset: ImageDataset) -> None:
 
                     # Combined loss and calculate gradients
                     error_G = (
-                        loss_identity_A
-                        + loss_identity_B
-                        + loss_GAN_A2B
-                        + loss_GAN_B2A
-                        + loss_cycle_ABA
-                        + loss_cycle_BAB
+                        loss_identity_A + loss_identity_B + loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB
                     )
 
                     # Calculate gradients for G_A and G_B
@@ -306,14 +374,11 @@ def train(dataset: ImageDataset) -> None:
                     """ 
                         # L_D(A) = Loss discriminator A
                         # L_D(B) = Loss discriminator B
-
                         # L_G(A2B) = Loss generator A2B
                         # L_G(B2A) = Loss generator B2A
-
                         # L_G_ID = Combined oentity loss generators A2B + B2A
                         # L_G_GAN = Combined GAN loss generators A2B + B2A
                         # L_G_CYCLE = Combined cycle consistency loss Generators A2B + B2A
-
                     """
 
                     # Print a progress bar in terminal
@@ -334,10 +399,10 @@ def train(dataset: ImageDataset) -> None:
                     if i % PRINT_FREQ == 0:
 
                         vutils.save_image(
-                            real_image_A, f"{DIR_OUTPUTS}/{RUN_PATH}/A/_real_samples.png", normalize=True,
+                            real_image_A, f"{DIR_OUTPUTS}/{RUN_PATH}/A/real_samples.png", normalize=True,
                         )
                         vutils.save_image(
-                            real_image_B, f"{DIR_OUTPUTS}/{RUN_PATH}/B/_real_samples.png", normalize=True,
+                            real_image_B, f"{DIR_OUTPUTS}/{RUN_PATH}/B/real_samples.png", normalize=True,
                         )
 
                         fake_image_A = 0.5 * (netG_B2A(real_image_B).data + 1.0)
@@ -363,21 +428,19 @@ def train(dataset: ImageDataset) -> None:
                             normalize=True,
                         )
 
-                        # Flatten the 4D tensor to a 1D numpy array
-                        np_fake_image_A = real_image_A.reshape(1, -1).squeeze().cpu().numpy()
-                        np_fake_image_B = real_image_B.reshape(1, -1).squeeze().cpu().numpy()
+                        # # Flatten the 4D tensor to a 1D numpy array
+                        # np_fake_image_A = real_image_A.reshape(1, -1).squeeze().cpu().numpy()
+                        # np_fake_image_B = real_image_B.reshape(1, -1).squeeze().cpu().numpy()
 
-                        # Save the real-time fake image tensor to a .csv for numerical-based debugging
-                        np.savetxt(f"{DIR_OUTPUTS}/{RUN_PATH}/A/fake_samples.csv", np_fake_image_A, delimiter=",")
-                        np.savetxt(f"{DIR_OUTPUTS}/{RUN_PATH}/B/fake_samples.csv", np_fake_image_B, delimiter=",")
-
-                    # </end> for i, data in progress_bar:
+                        # # Save the real-time fake image tensor to a .csv for numerical-based debugging
+                        # np.savetxt(f"{DIR_OUTPUTS}/{RUN_PATH}/A/fake_samples.csv", np_fake_image_A, delimiter=",")
+                        # np.savetxt(f"{DIR_OUTPUTS}/{RUN_PATH}/B/fake_samples.csv", np_fake_image_B, delimiter=",")
 
                 except Exception as e:
                     print(e)
                     pass
 
-                # </end> for i, data in enumerate(loader):
+                # </end> for i, data in progress_bar:
 
             # Check points, save weights after each epoch
             torch.save(netG_A2B.state_dict(), f"{DIR_WEIGHTS}/{RUN_PATH}/netG_A2B_epoch_{epoch}.pth")
@@ -410,73 +473,6 @@ def train(dataset: ImageDataset) -> None:
     # </end> def train():
 
 
-# Testing function
-def test(dataset: ImageDataset, path_to_folder: str, model_netG_A2B: str, model_netG_B2A: str) -> None:
-
-    """ Insert documentation """
-
-    # Iterate over every run, based on the configurated params
-    for run in RunCycleBuilder.get_runs(PARAMETERS):
-
-        # Store today's date in string format
-        TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
-        TODAY_TIME = datetime.today().strftime("%H.%M.%S")
-
-        # Create a unique name for this run
-        RUN_NAME = f"{TODAY_TIME}___EP{run.num_epochs}_DE{run.decay_epochs}_LR{run.learning_rate}_BS{run.batch_size}"
-        RUN_PATH = f"{NAME_DATASET}/{TODAY_DATE}/{RUN_NAME}"
-
-        # Make required directories for testing
-        try:
-            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "A"))
-            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "B"))
-        except OSError:
-            pass
-
-        # Allow cuddn to look for the optimal set of algorithms to improve runtime speed
-        cudnn.benchmark = True
-
-        # Dataloader
-        loader = DataLoader(
-            dataset=dataset, batch_size=run.batch_size, num_workers=run.num_workers, shuffle=run.shuffle
-        )
-
-        # create model
-        netG_A2B = Generator().to(run.device)
-        netG_B2A = Generator().to(run.device)
-
-        # Load state dicts
-        netG_A2B.load_state_dict(torch.load(os.path.join(str(path_to_folder), model_netG_A2B)))
-        netG_B2A.load_state_dict(torch.load(os.path.join(str(path_to_folder), model_netG_B2A)))
-
-        # Set model mode
-        netG_A2B.eval()
-        netG_B2A.eval()
-
-        # Create progress bar
-        progress_bar = tqdm(enumerate(loader), total=len(loader))
-
-        # Iterate over the data
-        for i, data in progress_bar:
-            # get batch size data
-            real_images_A = data["A"].to(run.device)
-            real_images_B = data["B"].to(run.device)
-
-            # Generate output
-            fake_image_A = 0.5 * (netG_B2A(real_images_B).data + 1.0)
-            fake_image_B = 0.5 * (netG_A2B(real_images_A).data + 1.0)
-
-            # Save image files
-            vutils.save_image(fake_image_A.detach(), f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}.png", normalize=True)
-            vutils.save_image(fake_image_B.detach(), f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}.png", normalize=True)
-
-            # Print a progress bar in terminal
-            progress_bar.set_description(f"Process images {i + 1} of {len(loader)}")
-
-    # </end> def test():
-    pass
-
-
 # Execute main code
 if __name__ == "__main__":
 
@@ -485,10 +481,10 @@ if __name__ == "__main__":
         # syn = Synthesis(mode="test")
         # syn.predict_depth()
 
-        # dataset_train = load_dataset(Mode="train", verbose=True)
-        # train(dataset=dataset_train)
+        dataset_train = load_dataset(mode="train", verbose=True)
+        train(dataset=dataset_train)
 
-        dataset_test = load_dataset(mode="test", verbose=True)
+        # dataset_test = load_dataset(mode="test", verbose=True)
 
         # test(
         #     dataset=dataset_test,
