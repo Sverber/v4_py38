@@ -54,12 +54,12 @@ class RunCycleManager:
         self.loader = None
         self.tb = None
 
-    def begin_run(self, run, device, netG_A2B, netG_B2A, netD_A, netD_B, loader) -> None:
-
-        return None
+    def begin_run(self, run, loader, netG_A2B, netG_B2A, netD_A, netD_B) -> None:
 
         """ [ Insert documentation ] """
 
+        return None
+        
         self.run.start_time = time.time()
         self.run.params = run
         self.run.count += 1
@@ -70,42 +70,49 @@ class RunCycleManager:
         self.netD_B = netD_B
 
         self.loader = loader
-        self.tb = SummaryWriter(comment=f"-{run}")
 
-        images, labels = next(iter(self.loader))
+        # self.tb = SummaryWriter(comment=f"-{run}")
+
+        # images, labels = next(iter(self.loader))
         # grid = torchvision.utils.make_grid(images)
 
         # self.tb.add_image("images", grid)
-        # self.tb.add_graph(self.netG_A2B, images.to(device))
-        # self.tb.add_graph(self.netG_B2A, images.to(device))
-        # self.tb.add_graph(self.netD_A, images.to(device))
-        # self.tb.add_graph(self.netD_B, images.to(device))
+        # self.tb.add_graph(self.netG_A2B, images.to(run.device))
+        # self.tb.add_graph(self.netG_B2A, images.to(run.device))
+        # self.tb.add_graph(self.netD_A, images.to(run.device))
+        # self.tb.add_graph(self.netD_B, images.to(run.device))
 
     def end_run(self) -> None:
 
-        return None
-
         """ [ Insert documentation ] """
+
+        return None
 
         self.tb.close()
         self.epoch.count = 0
 
+        pass
+
     def begin_epoch(self) -> None:
 
-        return None
-
         """ [ Insert documentation ] """
+       
+        return None
 
         self.epoch.start_time = time.time()
         self.epoch.count += 1
         self.epoch.loss = 0
         self.epoch.num_correct = 0
 
-    def end_epoch(self, save_runs=True, print_df=False) -> None:
+        pass
 
-        return None
+    def end_epoch(self, netG_A2B, netG_B2A, netD_A, netD_B, save_runs=True, print_df=True) -> None:
 
         """ [ Insert documentation ] """
+       
+        return None
+      
+        print("- TO-DO: Complete the manager.end_epoch() function.")
 
         self.epoch.duration = time.time() - self.epoch.start_time
         self.run.duration = time.time() - self.run.start_time
@@ -133,9 +140,7 @@ class RunCycleManager:
 
         if print_df:
             pprint.pprint(
-                pd.DataFrame.from_dict(self.run.data, orient="columns").sort_values(
-                    "accuracy", ascending=False
-                )
+                pd.DataFrame.from_dict(self.run.data, orient="columns").sort_values("accuracy", ascending=False)
             )
 
     def track_loss(self, loss, batch) -> None:
@@ -157,12 +162,10 @@ class RunCycleManager:
         return preds.argmax(dim=1).eq(labels).sum().item()
 
     def save(self, fileName) -> None:
-        
+
         """ [ Insert documentation ] """
 
-        pd.DataFrame.from_dict(self.run.data, orient="columns").to_csv(
-            f"{fileName}.csv"
-        )
+        pd.DataFrame.from_dict(self.run.data, orient="columns").to_csv(f"{fileName}.csv")
 
         with open(f"{fileName}.json", "w", encoding="utf-8") as f:
             json.dump(self.run.data, f, ensure_ascii=False, indent=4)
