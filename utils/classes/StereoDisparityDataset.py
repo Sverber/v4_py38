@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 
 
-class DisparityDataset(Dataset):
+class StereoDisparityDataset(Dataset):
 
     """ Insert documentation for ImageDataset class """
 
@@ -37,6 +37,8 @@ class DisparityDataset(Dataset):
 
     def __transform_GRAY2RGB(self, files) -> List:
 
+        print("\n__transform_GRAY2RGB")
+
         # For every not-RGB image, convert to RGB and save again
         for i, filepath in enumerate(files):
 
@@ -47,6 +49,7 @@ class DisparityDataset(Dataset):
 
                 # Check channels and if not 3 (RGB), convert to RGB and save
                 if image_rgb_tensor.shape[0] != 3:
+                    print(image_rgb_tensor.shape[0], "aint no 3")
                     image_rgb = Image.open(filepath).convert("RGB")
                     image_rgb.save(filepath)
 

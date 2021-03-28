@@ -37,16 +37,16 @@
     * Rncrop by 82%: (144, 65) pixels.
 
 * ### **Test_Set**
-    * Contains **676** training pairs of stereo images with the corresponding disparity map.
-    * Contains **0** test pairs of stereo images with the corresponding disparity map.
+    * Contains **600** training pairs of stereo images and their corresponding disparity map.
+    * Contains **76** test pairs of stereo images and their corresponding disparity map.
     * Original image dimensions are **2208 pixels** in width by **1242 pixels** in height using **3 channels**.
     * Resize to 10%: (147, 83) pixels.
     * Rncrop by 82%: (120, 68) pixels.
 
 * ### **UASOL**
     * ***Under construction***
-    * Contains **676** training pairs of stereo images with the corresponding disparity map.
-    * Contains **0** test pairs of stereo images with the corresponding disparity map.
+    * Contains **0** training pairs of stereo images and their corresponding disparity map.
+    * Contains **0** test pairs of stereo images and their corresponding disparity map.
     * Original image dimensions are **2208 pixels** in width by **1242 pixels** in height using **3 channels**.
     * Resize to 10%: (83, 147) pixels.
     * Rncrop by 82%: (68, 120) pixels.
