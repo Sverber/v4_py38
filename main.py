@@ -619,8 +619,8 @@ def test(
                 f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}___fake_original_MSE{mse_loss_f_or_B:.3f}.png",
             )
 
-           # Save images
-            if i % STORE_FREQ == 0 :
+            # Save images
+            if i % STORE_FREQ == 0:
                 # Save real input images
                 vutils.save_image(real_image_A.detach(), filepath_real_A, normalize=True)
                 vutils.save_image(real_image_B.detach(), filepath_real_B, normalize=True)
@@ -648,9 +648,8 @@ def test(
         print("MSE(avg) A:", avg_mse_loss_A)
         print("MSE(avg) B:", avg_mse_loss_B)
         print("\n- Write a performance summary function & include more loss functions to test network performance. ")
-        print(
-            "- Calculate MSE loss for the generated originals using the correct out_channels in corresponding Generators."
-        )
+        print("- Calculate MSE loss for the generated originals with correct out_channels in Generators.")
+        print("- More notes come here..")
 
     # </end> def test():
     pass
