@@ -2,9 +2,13 @@
 **/__pycache__
 **/.vscode  
 
+
 # Ignore all images to avoid uploading images accidently | Keep .jpg like this: !/results/*.jpg
 **/*.jpg
 **/*.png
+
+# Allow images in root folder
+!/*.png  
 
 # Ignore dataset folders directories content
 dataset/*
