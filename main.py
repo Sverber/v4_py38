@@ -354,7 +354,7 @@ def train(dataset: StereoDisparityDataset):
 
                 # Calculate the mean square error (MSE) loss
                 if i % 10 == 0: 
-                    print("--- F_I(train):", fake_image_A.shape, fake_image_B.shape, real_image_A.shape, real_image_B.shape) 
+                    print("--- F_I(train):", fake_image_A.size(), fake_image_B.size(), real_image_A.size(), real_image_B.size()) 
               
                 mse_loss_A = mse_loss(fake_image_A, real_image_B)
                 mse_loss_B = mse_loss(fake_image_B, real_image_A)
@@ -371,7 +371,7 @@ def train(dataset: StereoDisparityDataset):
 
                 # Calculate the mean square error (MSE) for the generated (fake) originals A and B
                 if i % 10 == 0: 
-                    print("--- F_O(train):", fake_original_image_A.shape, fake_original_image_B.shape, real_image_A.shape, real_image_B.shape)
+                    print("--- F_O(train):", fake_original_image_A.size(), fake_original_image_B.size(), real_image_A.size(), real_image_B.size())
                 mse_loss_f_or_A = mse_loss(fake_original_image_A, real_image_A)
                 mse_loss_f_or_B = mse_loss(fake_original_image_B, real_image_B)
 
@@ -495,7 +495,7 @@ def train(dataset: StereoDisparityDataset):
                     __save_end_epoch_output(_output_path=f"{DIR_OUTPUTS}/{RUN_PATH}")
 
                 # Print a progress bar in the terminal
-                __print_progress()
+                # __print_progress()"
 
                 # except Exception as e:
                 #     print(e)
@@ -632,7 +632,7 @@ def test(dataset: StereoDisparityDataset, path_to_folder: str, model_netG_A2B: s
 
             # Calculate the mean square error (MSE) loss
             if i % 10 == 0: 
-                print("--- F_I(test):", fake_image_A.shape, fake_image_B.shape, real_image_A.shape, real_image_B.shape)
+                print("--- F_I(test):", fake_image_A.size(), fake_image_B.size(), real_image_A.size(), real_image_B.size())
             mse_loss_A = mse_loss(fake_image_A, real_image_B)
             mse_loss_B = mse_loss(fake_image_B, real_image_A)
 
@@ -648,7 +648,7 @@ def test(dataset: StereoDisparityDataset, path_to_folder: str, model_netG_A2B: s
 
             # Calculate the mean square error (MSE) for the generated (fake) originals A and B
             if i % 10 == 0: 
-                print("--- F_O(test):", fake_image_A.shape, fake_image_B.shape, real_image_A.shape, real_image_B.shape)
+                print("--- F_O(test):", fake_image_A.size(), fake_image_B.size(), real_image_A.size(), real_image_B.size())
             mse_loss_f_or_A = mse_loss(fake_original_image_A, real_image_A)
             mse_loss_f_or_B = mse_loss(fake_original_image_B, real_image_B)
 

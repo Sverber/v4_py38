@@ -37,8 +37,6 @@ class StereoDisparityDataset(Dataset):
 
     def __transform_GRAY2RGB(self, files) -> List:
 
-        print("\n__transform_GRAY2RGB")
-
         # For every not-RGB image, convert to RGB and save again
         for i, filepath in enumerate(files):
 

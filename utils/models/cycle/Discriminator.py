@@ -10,7 +10,7 @@ class __Discriminator(nn.Module):
 
     def __init__(self, in_channels: int = 3, out_channels: int = 3):
 
-        super(Discriminator, self).__init__()
+        super().__init__()
 
         self._in_channels = in_channels
         self._out_channels = out_channels
@@ -58,7 +58,7 @@ class Discriminator(nn.Module):
 
     def __init__(self, in_channels: int = 3, out_channels: int = 3):
 
-        super(Discriminator, self).__init__()
+        super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels

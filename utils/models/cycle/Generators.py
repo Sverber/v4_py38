@@ -60,13 +60,14 @@ class __Generator(nn.Module):
     def forward(self, x):
         return self.main(x)
 
+
 class Generator(nn.Module):
 
     """ Insert documentation """
 
     def __init__(self, in_channels: int = 3, out_channels: int = 3):
 
-        super(Generator, self).__init__()
+        super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -103,10 +104,14 @@ class Generator(nn.Module):
             #
             # Upsampling
             #
-            nn.ConvTranspose2d(in_channels=256, out_channels=128, kernel_size=(3, 3), stride=2, padding=1, output_padding=1),
+            nn.ConvTranspose2d(
+                in_channels=256, out_channels=128, kernel_size=(3, 3), stride=2, padding=1, output_padding=1
+            ),
             nn.InstanceNorm2d(num_features=128),
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(in_channels=128, out_channels=64, kernel_size=(3, 3), stride=2, padding=1, output_padding=1),
+            nn.ConvTranspose2d(
+                in_channels=128, out_channels=64, kernel_size=(3, 3), stride=2, padding=1, output_padding=1
+            ),
             nn.InstanceNorm2d(num_features=64),
             nn.ReLU(inplace=True),
             #
