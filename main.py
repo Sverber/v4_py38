@@ -39,8 +39,8 @@ from utils.models.cycle.Generators import (
     GeneratorGrayScaled,
     OneToMultiGenerator,
     MultiToOneGenerator,
-    OneToMultiGenerator_3C_TO_1C,
-    MultiToOneGenerator_1C_TO_3C,
+    OneToMultiGenerator_1C_TO_3C,
+    MultiToOneGenerator_3C_TO_1C,
 )
 
 
@@ -59,8 +59,8 @@ DIR_WEIGHTS = f"./weights"
 # NAME_DATASET = f"horse2zebra_000_999"
 # NAME_DATASET = f"kitti_synthesized_000_999"
 # NAME_DATASET = f"stereo_test"
-NAME_DATASET = f"DrivingStereo_demo_images"
-# NAME_DATASET = f"Test_Set"  # 2208 x 1242 --> divide by 15
+# NAME_DATASET = f"DrivingStereo_demo_images"
+NAME_DATASET = f"Test_Set"  # 2208 x 1242 --> divide by 15
 # NAME_DATASET = f"QuickDevelop"
 
 
@@ -71,11 +71,11 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Constants: parameters
 # IMAGE_SIZE = (122, 35) # kitti_synthesized_000_999
 # IMAGE_SIZE = (176, 79)  # DrivingStereo_demo_images
-IMAGE_SIZE = (147, 83)  # DrivingStereo_demo_images
+IMAGE_SIZE = (147, 83)  # Test_Set
 RATIO_CROP = 0.82
 RANDM_CROP = (int(IMAGE_SIZE[0] * RATIO_CROP), int(IMAGE_SIZE[1] * RATIO_CROP))
 PRINT_FREQ = 5
-STORE_FREQ = 1
+IMSAVE_FREQ = 10
 
 # Configure network parameters
 PARAMETERS: OrderedDict = OrderedDict(
@@ -152,8 +152,8 @@ def train(dataset: DisparityDataset):
             pass
 
         # Create Generator and Discriminator models
-        netG_A2B = OneToMultiGenerator().to(run.device)
-        netG_B2A = MultiToOneGenerator().to(run.device)
+        netG_A2B = OneToMultiGenerator_1C_TO_3C().to(run.device)
+        netG_B2A = MultiToOneGenerator_3C_TO_1C().to(run.device)
         netD_A = Discriminator().to(run.device)
         netD_B = Discriminator().to(run.device)
 
@@ -202,9 +202,9 @@ def train(dataset: DisparityDataset):
             # Track the start of the epoch
             manager.begin_epoch()
 
-            # Loss metric calculated per epoch
-            cum_mse_loss_A = 0
-            cum_mse_loss_B = 0
+            # Initiate mean squared error (MSE) losses variables
+            avg_mse_loss_A, avg_mse_loss_B, avg_mse_loss_f_or_A, avg_mse_loss_f_or_B = 0, 0, 0, 0
+            cum_mse_loss_A, cum_mse_loss_B, cum_mse_loss_f_or_A, cum_mse_loss_f_or_B = 0, 0, 0, 0
 
             # Create progress bar
             progress_bar = tqdm(enumerate(loader), total=len(loader))
@@ -331,25 +331,51 @@ def train(dataset: DisparityDataset):
                     # Initiate a mean square error (MSE) loss function
                     mse_loss = nn.MSELoss()
 
-                    # Prepare fake originals and
-                    fake_image_A = 0.5 * (fake_image_A.data + 1.0)
-                    fake_image_B = 0.5 * (fake_image_B.data + 1.0)
+                    """ Convert the tensors to usable image arrays """
 
-                    # Make the fake original images of A and B
-                    fake_original_image_A = 0.5 * (netG_B2A(fake_image_B).data + 1.0)
-                    fake_original_image_B = 0.5 * (netG_B2A(fake_image_A).data + 1.0)
+                    # Generate output
+                    _fake_image_A = netG_B2A(real_image_B)
+                    _fake_image_B = netG_A2B(real_image_A)
 
-                    # Calculate the mean square error (MSE) for the fake originals A and B
-                    mse_loss_A = mse_loss(real_image_A, fake_original_image_A)
-                    mse_loss_B = mse_loss(real_image_B, fake_original_image_B)
+                    # Generate original image from generated (fake) output
+                    _fake_original_image_A = netG_B2A(_fake_image_B)
+                    _fake_original_image_B = netG_A2B(_fake_image_A)
 
-                    # Calculate the average mean square error (MSE) for the fake originals A and B
+                    # Convert to usable images
+                    fake_image_A = 0.5 * (_fake_image_A.data + 1.0)
+                    fake_image_B = 0.5 * (_fake_image_B.data + 1.0)
+
+                    # Convert to usable images
+                    fake_original_image_A = 0.5 * (_fake_original_image_A.data + 1.0)
+                    fake_original_image_B = 0.5 * (_fake_original_image_B.data + 1.0)
+
+                    """ Calculate losses for the generated (fake) output """
+
+                    # Calculate the mean square error (MSE) loss
+                    mse_loss_A = mse_loss(fake_image_A, real_image_B)
+                    mse_loss_B = mse_loss(fake_image_B, real_image_A)
+
+                    # Calculate the sum of all mean square error (MSE) losses
                     cum_mse_loss_A += mse_loss_A
                     cum_mse_loss_B += mse_loss_B
 
-                    # Calculate the average mean square error (MSE) for the fake originals A and B
+                    # Calculate the average mean square error (MSE) loss
                     avg_mse_loss_A = cum_mse_loss_A / (i + 1)
                     avg_mse_loss_B = cum_mse_loss_B / (i + 1)
+
+                    """ Calculate losses for the generated (fake) original images """
+
+                    # Calculate the mean square error (MSE) for the generated (fake) originals A and B
+                    mse_loss_f_or_A = mse_loss(fake_original_image_A, real_image_A)
+                    mse_loss_f_or_B = mse_loss(fake_original_image_B, real_image_B)
+
+                    # Calculate the average mean square error (MSE) for the fake originals A and B
+                    cum_mse_loss_f_or_A += mse_loss_f_or_A
+                    cum_mse_loss_f_or_B += mse_loss_f_or_B
+
+                    # Calculate the average mean square error (MSE) for the fake originals A and B
+                    avg_mse_loss_f_or_A = cum_mse_loss_f_or_A / (i + 1)
+                    avg_mse_loss_f_or_B = cum_mse_loss_f_or_B / (i + 1)
 
                     """ (5) Save all generated network output and """
 
@@ -442,8 +468,10 @@ def train(dataset: DisparityDataset):
                             # f"L_G_GAN: {(loss_GAN_A2B + loss_GAN_B2A).item():.3f} "
                             # f"L_G_CYCLE: {(loss_cycle_ABA + loss_cycle_BAB).item():.3f} "
                             #
-                            f"G(A2B2A)_MSE(avg): {(avg_mse_loss_A).item():.3f} "
-                            f"G(B2A2B)_MSE(avg): {(avg_mse_loss_B).item():.3f} "
+                            f"G(A2B)_MSE(avg): {(avg_mse_loss_A).item():.3f} "
+                            f"G(B2A)_MSE(avg): {(avg_mse_loss_B).item():.3f} "
+                            f"G(A2B2A)_MSE(avg): {(avg_mse_loss_f_or_A).item():.2f} "
+                            f"G(B2A2B)_MSE(avg): {(avg_mse_loss_f_or_B).item():.2f} "
                         )
 
                         pass
@@ -453,7 +481,7 @@ def train(dataset: DisparityDataset):
                         __save_realtime_output(_output_path=f"{DIR_OUTPUTS}/{RUN_PATH}")
 
                     # Save the network weights at the end of the epoch
-                    if i + 1 == len(loader) and epoch % STORE_FREQ == 0:
+                    if i + 1 == len(loader) and epoch % IMSAVE_FREQ == 0:
                         __save_end_epoch_output(_output_path=f"{DIR_OUTPUTS}/{RUN_PATH}")
 
                     # Print a progress bar in the terminal
@@ -513,7 +541,7 @@ def test(
     # Iterate over every run, based on the configurated params
     for run in RunCycleBuilder.get_runs(PARAMETERS):
 
-        print("Running this test the '{}' trained model")
+        print("Running this test using the '{model_name}' model weights")
 
         # Store today's date in string format
         TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
@@ -539,8 +567,8 @@ def test(
         )
 
         # Create model
-        netG_A2B = OneToMultiGenerator_3C_TO_1C().to(run.device)
-        netG_B2A = MultiToOneGenerator_1C_TO_3C().to(run.device)
+        netG_A2B = OneToMultiGenerator_1C_TO_3C().to(run.device)
+        netG_B2A = MultiToOneGenerator_3C_TO_1C().to(run.device)
 
         # Load state dicts
         netG_A2B.load_state_dict(torch.load(os.path.join(str(path_to_folder), model_netG_A2B)))
@@ -557,7 +585,8 @@ def test(
         mse_loss = nn.MSELoss()
 
         # Initiate mean squared error (MSE) losses variables
-        avg_mse_loss_A, avg_mse_loss_B, cum_mse_loss_A, cum_mse_loss_B = 0, 0, 0, 0
+        avg_mse_loss_A, avg_mse_loss_B, avg_mse_loss_f_or_A, avg_mse_loss_f_or_B = 0, 0, 0, 0
+        cum_mse_loss_A, cum_mse_loss_B, cum_mse_loss_f_or_A, cum_mse_loss_f_or_B = 0, 0, 0, 0
 
         # Iterate over the data
         for i, data in progress_bar:
@@ -593,19 +622,33 @@ def test(
             fake_original_image_A = 0.5 * (_fake_original_image_A.data + 1.0)
             fake_original_image_B = 0.5 * (_fake_original_image_B.data + 1.0)
 
-            """ Calculate the losses """
+            """ Calculate losses for the generated (fake) output """
 
-            # Calculate mean square error (MSE) losses for the generated (fake) output images
-            mse_loss_A = mse_loss(fake_image_B, real_image_A)
-            mse_loss_B = mse_loss(fake_image_A, real_image_B)
+            # Calculate the mean square error (MSE) loss
+            mse_loss_A = mse_loss(fake_image_A, real_image_B)
+            mse_loss_B = mse_loss(fake_image_B, real_image_A)
 
-            # Calculate mean square error (MSE) losses for the generated (fake) original images
+            # Calculate the sum of all mean square error (MSE) losses
+            cum_mse_loss_A += mse_loss_A
+            cum_mse_loss_B += mse_loss_B
+
+            # Calculate the average mean square error (MSE) loss
+            avg_mse_loss_A = cum_mse_loss_A / (i + 1)
+            avg_mse_loss_B = cum_mse_loss_B / (i + 1)
+
+            """ Calculate losses for the generated (fake) original images """
+
+            # Calculate the mean square error (MSE) for the generated (fake) originals A and B
             mse_loss_f_or_A = mse_loss(fake_original_image_A, real_image_A)
             mse_loss_f_or_B = mse_loss(fake_original_image_B, real_image_B)
 
-            # Cumulate the mean square error (MSE) losses
-            cum_mse_loss_A += mse_loss_A
-            cum_mse_loss_B += mse_loss_B
+            # Calculate the average mean square error (MSE) for the fake originals A and B
+            cum_mse_loss_f_or_A += mse_loss_f_or_A
+            cum_mse_loss_f_or_B += mse_loss_f_or_B
+
+            # Calculate the average mean square error (MSE) for the fake originals A and B
+            avg_mse_loss_f_or_A = cum_mse_loss_f_or_A / (i + 1)
+            avg_mse_loss_f_or_B = cum_mse_loss_f_or_B / (i + 1)
 
             """ Define filepaths, save generated output and print a progress bar """
 
@@ -620,7 +663,7 @@ def test(
             )
 
             # Save images
-            if i % STORE_FREQ == 0:
+            if i % IMSAVE_FREQ == 0:
                 # Save real input images
                 vutils.save_image(real_image_A.detach(), filepath_real_A, normalize=True)
                 vutils.save_image(real_image_B.detach(), filepath_real_B, normalize=True)
@@ -644,9 +687,15 @@ def test(
         avg_mse_loss_A = cum_mse_loss_A / len(loader)
         avg_mse_loss_B = cum_mse_loss_B / len(loader)
 
+        # Calculate average mean squared error (MSE)
+        avg_mse_loss_f_or_A = cum_mse_loss_f_or_A / len(loader)
+        avg_mse_loss_f_or_B = cum_mse_loss_f_or_B / len(loader)
+
         # Print
         print("MSE(avg) A:", avg_mse_loss_A)
         print("MSE(avg) B:", avg_mse_loss_B)
+        print("MSE(avg) A:", avg_mse_loss_f_or_A)
+        print("MSE(avg) B:", avg_mse_loss_f_or_B)
         print("\n- Write a performance summary function & include more loss functions to test network performance. ")
         print("- Calculate MSE loss for the generated originals with correct out_channels in Generators.")
         print("- More notes come here..")
@@ -663,24 +712,24 @@ if __name__ == "__main__":
         # syn = Synthesis(mode="test")
         # syn.predict_depth()
 
-        # dataset_train = load_dataset(mode="train", verbose=True)
-        # train(dataset=dataset_train)
+        dataset_train = load_dataset(name_dataset="QuickDevelop", mode="train", verbose=True)
+        train(dataset=dataset_train)
 
-        dataset_test = load_dataset(name_dataset="DrivingStereo_demo_images", mode="test", verbose=True)
+        # dataset_test = load_dataset(name_dataset="DrivingStereo_demo_images", mode="test", verbose=True)
 
-        __DATASET, __DATE, __MODEL_NAME = (
-            f"Test_Set",
-            f"2021-03-26",
-            f"16.38.24___EP100_DE50_LR0.0002_BS1",
-        )
+        # __DATASET, __DATE, __MODEL_NAME = (
+        #     f"Test_Set",
+        #     f"2021-03-26",
+        #     f"16.38.24___EP100_DE50_LR0.0002_BS1",
+        # )
 
-        test(
-            dataset=dataset_test,
-            model_name="",
-            path_to_folder=f"{DIR_WEIGHTS}/{__DATASET}/{__DATE}/{__MODEL_NAME}",
-            model_netG_A2B=f"netG_A2B.pth",
-            model_netG_B2A=f"netG_B2A.pth",
-        )
+        # test(
+        #     dataset=dataset_test,
+        #     model_name="",
+        #     path_to_folder=f"{DIR_WEIGHTS}/{__DATASET}/{__DATE}/{__MODEL_NAME}",
+        #     model_netG_A2B=f"netG_A2B.pth",
+        #     model_netG_B2A=f"netG_B2A.pth",
+        # )
 
         pass
 

@@ -205,7 +205,7 @@ class OneToMultiGenerator(nn.Module):
 
     def __init__(self):
 
-        super().__init__()
+        super(OneToMultiGenerator, self).__init__()
 
         self.main = nn.Sequential(
             #
@@ -263,7 +263,7 @@ class MultiToOneGenerator(nn.Module):
 
     def __init__(self):
 
-        super().__init__()
+        super(MultiToOneGenerator, self).__init__()
 
         self.main = nn.Sequential(
             #
@@ -315,16 +315,16 @@ class MultiToOneGenerator(nn.Module):
         return self.main(x)
 
 
-class OneToMultiGenerator_3C_TO_1C(nn.Module):
+class OneToMultiGenerator_1C_TO_3C(nn.Module):
 
     """ Insert documentation """
 
-    def __init__(self):
+    def __init__(self, in_channels: int = 3, out_channels: int = 3):
 
-        super().__init__()
+        super(OneToMultiGenerator_1C_TO_3C, self).__init__()
 
-        self._in_channels = 3
-        self._out_channels = 3
+        self._in_channels = in_channels
+        self._out_channels = out_channels
 
         self.main = nn.Sequential(
             #
@@ -380,16 +380,16 @@ class OneToMultiGenerator_3C_TO_1C(nn.Module):
         return self.main(x)
 
 
-class MultiToOneGenerator_1C_TO_3C(nn.Module):
+class MultiToOneGenerator_3C_TO_1C(nn.Module):
 
     """ Insert documentation """
 
-    def __init__(self):
+    def __init__(self, in_channels: int = 3, out_channels: int = 3):
 
-        super().__init__()
+        super(MultiToOneGenerator_3C_TO_1C, self).__init__()
 
-        self._in_channels = 3
-        self._out_channels = 3
+        self._in_channels = in_channels
+        self._out_channels = out_channels
 
         self.main = nn.Sequential(
             #
