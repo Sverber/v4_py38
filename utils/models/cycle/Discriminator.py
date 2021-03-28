@@ -3,18 +3,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class Discriminator(nn.Module):
+class __Discriminator(nn.Module):
 
     """ Insert documentation """
 
-    def __init__(self):
-        super().__init__()
+
+    def __init__(self, in_channels: int = 3, out_channels: int = 3):
+
+        super(Discriminator, self).__init__()
+
+        self._in_channels = in_channels
+        self._out_channels = out_channels
 
         self.main = nn.Sequential(
             #
             # Input layer
             #
-            nn.Conv2d(3, 64, 4, stride=2, padding=1),
+            nn.Conv2d(self._in_channels, 64, 4, stride=2, padding=1),
             nn.LeakyReLU(0.2, inplace=True),
             #
             # Upsampling
@@ -37,7 +42,7 @@ class Discriminator(nn.Module):
             #
             # Output layer
             #
-            nn.Conv2d(512, 1, 4, padding=1),
+            nn.Conv2d(512, self._out_channels, 4, padding=1),
         )
 
     def forward(self, x):
@@ -47,18 +52,22 @@ class Discriminator(nn.Module):
         return x
 
 
-class DiscriminatorGrayScaled(nn.Module):
+class Discriminator(nn.Module):
 
     """ Insert documentation """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, in_channels: int = 3, out_channels: int = 3):
+
+        super(Discriminator, self).__init__()
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
 
         self.main = nn.Sequential(
             #
             # Input layer
             #
-            nn.Conv2d(in_channels=1, out_channels=64, kernel_size=(4, 4), stride=2, padding=1),
+            nn.Conv2d(in_channels=self.in_channels, out_channels=64, kernel_size=(4, 4), stride=2, padding=1),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
             #
             # Upsampling
@@ -81,7 +90,7 @@ class DiscriminatorGrayScaled(nn.Module):
             #
             # Output layer
             #
-            nn.Conv2d(in_channels=512, out_channels=1, kernel_size=(4, 4), padding=1),
+            nn.Conv2d(in_channels=512, out_channels=self.out_channels, kernel_size=(4, 4), padding=1),
         )
 
     def forward(self, x):

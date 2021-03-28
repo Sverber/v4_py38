@@ -22,7 +22,6 @@ from collections import OrderedDict
 from skimage.metrics import structural_similarity as ssim
 
 from torch.utils.data.dataloader import DataLoader
-from torch.utils.data.dataset import Dataset
 
 from synthesis.Synthesis import Synthesis
 
@@ -34,14 +33,8 @@ from utils.classes.RunCycleBuilder import RunCycleBuilder
 from utils.classes.RunCycleManager import RunCycleManager
 from utils.classes.DisparityDataset import DisparityDataset
 
-from utils.models.cycle.Discriminator import Discriminator, DiscriminatorGrayScaled
-from utils.models.cycle.Generators import (
-    GeneratorGrayScaled,
-    OneToMultiGenerator,
-    MultiToOneGenerator,
-    OneToMultiGenerator_1C_TO_3C,
-    MultiToOneGenerator_3C_TO_1C,
-)
+from utils.models.cycle.Discriminator import Discriminator
+from utils.models.cycle.Generators import Generator
 
 
 # Clear terminal
@@ -89,16 +82,26 @@ PARAMETERS: OrderedDict = OrderedDict(
 )
 
 
-# Transformations on the datasets
-TRANSFORMATIONS: transforms = transforms.Compose(
+# Transformations on the datasets containing RGB stereo images
+TRANSFORMATIONS_RGB: transforms = transforms.Compose(
     [
         transforms.Resize(size=IMAGE_SIZE, interpolation=Image.BICUBIC),
         transforms.RandomCrop(size=RANDM_CROP),
         transforms.RandomHorizontalFlip(),
-        # transforms.Grayscale(num_output_channels=1),
         transforms.ToTensor(),
-        # transforms.Normalize(mean=(0.5), std=(0.5)),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    ]
+)
+
+# Transformations on the datasets containing grayscaled disparity maps
+TRANSFORMATIONS_GRAY: transforms = transforms.Compose(
+    [
+        transforms.Resize(size=IMAGE_SIZE, interpolation=Image.BICUBIC),
+        transforms.RandomCrop(size=RANDM_CROP),
+        transforms.RandomHorizontalFlip(),
+        transforms.Grayscale(num_output_channels=1),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=(0.5), std=(0.5)),
     ]
 )
 
@@ -107,16 +110,16 @@ TRANSFORMATIONS: transforms = transforms.Compose(
 def load_dataset(name_dataset: str, mode: str, verbose: bool = True) -> DisparityDataset:
 
     # Print start message if verbose is set to True
-    verbose is True if print(f"Reading the '{mode}' dataset from '{name_dataset}'") else None
+    verbose is True if print(f"Gathering the '{mode}' dataset from '{name_dataset}'") else None
 
     # Gather dataset
     dataset: DisparityDataset = DisparityDataset(
-        root=f"./{DIR_DATASET}/{name_dataset}", mode=mode, transform=TRANSFORMATIONS
+        root=f"./{DIR_DATASET}/{name_dataset}", mode=mode, transform=TRANSFORMATIONS_RGB
     )
 
     # Print completion message if verbose is set to True
     verbose is True if print(
-        f"Grabbed the '{mode}' dataset from '{name_dataset}', which has a length of: {len(dataset)}."
+        f"Loaded the '{mode}' dataset from '{name_dataset}', which has a length of: {len(dataset)}."
     ) else None
 
     return dataset
@@ -152,10 +155,10 @@ def train(dataset: DisparityDataset):
             pass
 
         # Create Generator and Discriminator models
-        netG_A2B = OneToMultiGenerator_1C_TO_3C().to(run.device)
-        netG_B2A = MultiToOneGenerator_3C_TO_1C().to(run.device)
-        netD_A = Discriminator().to(run.device)
-        netD_B = Discriminator().to(run.device)
+        netG_A2B = Generator(in_channels=3, out_channels=3).to(run.device)
+        netG_B2A = Generator(in_channels=3, out_channels=3).to(run.device)
+        netD_A = Discriminator(in_channels=3, out_channels=3).to(run.device)
+        netD_B = Discriminator(in_channels=3, out_channels=3).to(run.device)
 
         # Apply weights
         netG_A2B.apply(initialize_weights)
@@ -424,8 +427,8 @@ def train(dataset: DisparityDataset):
                         ) = (
                             f"{_output_path}/A/epochs/EP{epoch}___real_sample.png",
                             f"{_output_path}/B/epochs/EP{epoch}___real_sample.png",
-                            f"{_output_path}/A/epochs/EP{epoch}___fake_sample.png",
-                            f"{_output_path}/B/epochs/EP{epoch}___fake_sample.png",
+                            f"{_output_path}/A/epochs/EP{epoch}___fake_sample_MSE{mse_loss_A:.3f}.png",
+                            f"{_output_path}/B/epochs/EP{epoch}___fake_sample_MSE{mse_loss_B:.3f}.png",
                             f"{_output_path}/A/epochs/EP{epoch}___fake_original_MSE{avg_mse_loss_A:.3f}.png",
                             f"{_output_path}/B/epochs/EP{epoch}___fake_original_MSE{avg_mse_loss_B:.3f}.png",
                         )
@@ -447,29 +450,33 @@ def train(dataset: DisparityDataset):
                     def __print_progress() -> None:
 
                         """ 
-                            # L_D(A) = Loss discriminator A
-                            # L_D(B) = Loss discriminator B
-                            # L_G(A2B) = Loss generator A2B
-                            # L_G(B2A) = Loss generator B2A
-                            # L_G_ID = Combined oentity loss generators A2B + B2A
-                            # L_G_GAN = Combined GAN loss generators A2B + B2A
-                            # L_G_CYCLE = Combined cycle consistency loss Generators A2B + B2A
+                            
+                            # L_D(A)                = Loss discriminator A
+                            # L_D(B)                = Loss discriminator B
+                            # L_G(A2B)              = Loss generator A2B
+                            # L_G(B2A)              = Loss generator B2A
+                            # L_G_ID                = Combined oentity loss generators A2B + B2A
+                            # L_G_GAN               = Combined GAN loss generators A2B + B2A
+                            # L_G_CYCLE             = Combined cycle consistency loss Generators A2B + B2A
+                            # G(A2B)_MSE(avg)       = Mean square error (MSE) loss over the generated output B vs. the real image A
+                            # G(B2A)_MSE(avg)       = Mean square error (MSE) loss over the generated output A vs. the real image B
+                            # G(A2B2A)_MSE(avg)     = Average mean square error (MSE) loss over the generated original image A vs. the real image A
+                            # G(B2A2B)_MSE(avg)     = Average mean square error (MSE) loss over the generated original image B vs. the real image B
+
                         """
 
                         progress_bar.set_description(
                             f"[{epoch + 1}/{run.num_epochs}][{i + 1}/{len(loader)}] "
-                            f"L_D(A): {error_D_A.item():.3f} "
-                            f"L_D(B): {error_D_B.item():.3f} | "
-                            #
-                            f"L_G(A2B): {loss_GAN_A2B.item():.3f} "
-                            f"L_G(B2A): {loss_GAN_B2A.item():.3f} | "
-                            #
-                            # f"L_G_ID: {(loss_identity_A + loss_identity_B).item():.3f} "
-                            # f"L_G_GAN: {(loss_GAN_A2B + loss_GAN_B2A).item():.3f} "
-                            # f"L_G_CYCLE: {(loss_cycle_ABA + loss_cycle_BAB).item():.3f} "
-                            #
-                            f"G(A2B)_MSE(avg): {(avg_mse_loss_A).item():.3f} "
-                            f"G(B2A)_MSE(avg): {(avg_mse_loss_B).item():.3f} "
+                            # f"L_D(A): {error_D_A.item():.2f} "
+                            # f"L_D(B): {error_D_B.item():.2f} | "
+                            f"L_D(A+B): {((error_D_A + error_D_B) / 2).item():.2f} | "
+                            f"L_G(A2B): {loss_GAN_A2B.item():.2f} "
+                            f"L_G(B2A): {loss_GAN_B2A.item():.2f} | "
+                            # f"L_G_ID: {(loss_identity_A + loss_identity_B).item():.2f} "
+                            # f"L_G_GAN: {(loss_GAN_A2B + loss_GAN_B2A).item():.2f} "
+                            # f"L_G_CYCLE: {(loss_cycle_ABA + loss_cycle_BAB).item():.2f} "
+                            f"G(A2B)_MSE(avg): {(avg_mse_loss_A).item():.2f} "
+                            f"G(B2A)_MSE(avg): {(avg_mse_loss_B).item():.2f} | "
                             f"G(A2B2A)_MSE(avg): {(avg_mse_loss_f_or_A).item():.2f} "
                             f"G(B2A2B)_MSE(avg): {(avg_mse_loss_f_or_B).item():.2f} "
                         )
@@ -532,16 +539,12 @@ def train(dataset: DisparityDataset):
 
 
 # Testing function
-def test(
-    dataset: DisparityDataset, model_name: str, path_to_folder: str, model_netG_A2B: str, model_netG_B2A: str
-) -> None:
+def test(dataset: DisparityDataset, path_to_folder: str, model_netG_A2B: str, model_netG_B2A: str) -> None:
 
     """ Insert documentation """
 
     # Iterate over every run, based on the configurated params
     for run in RunCycleBuilder.get_runs(PARAMETERS):
-
-        print("Running this test using the '{model_name}' model weights")
 
         # Store today's date in string format
         TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
@@ -567,8 +570,8 @@ def test(
         )
 
         # Create model
-        netG_A2B = OneToMultiGenerator_1C_TO_3C().to(run.device)
-        netG_B2A = MultiToOneGenerator_3C_TO_1C().to(run.device)
+        netG_A2B = Generator(in_channels=3, out_channels=3).to(run.device)
+        netG_B2A = Generator(in_channels=3, out_channels=3).to(run.device)
 
         # Load state dicts
         netG_A2B.load_state_dict(torch.load(os.path.join(str(path_to_folder), model_netG_A2B)))
@@ -698,6 +701,8 @@ def test(
         print("MSE(avg) B:", avg_mse_loss_f_or_B)
         print("\n- Write a performance summary function & include more loss functions to test network performance. ")
         print("- Calculate MSE loss for the generated originals with correct out_channels in Generators.")
+        print("- Start to organize train() into a TrainManager class or something, also for test()")
+        print("- Seperate function for loss calculation.")
         print("- More notes come here..")
 
     # </end> def test():
@@ -712,7 +717,7 @@ if __name__ == "__main__":
         # syn = Synthesis(mode="test")
         # syn.predict_depth()
 
-        dataset_train = load_dataset(name_dataset="QuickDevelop", mode="train", verbose=True)
+        dataset_train = load_dataset(name_dataset=NAME_DATASET, mode="train", verbose=True)
         train(dataset=dataset_train)
 
         # dataset_test = load_dataset(name_dataset="DrivingStereo_demo_images", mode="test", verbose=True)
@@ -725,7 +730,6 @@ if __name__ == "__main__":
 
         # test(
         #     dataset=dataset_test,
-        #     model_name="",
         #     path_to_folder=f"{DIR_WEIGHTS}/{__DATASET}/{__DATE}/{__MODEL_NAME}",
         #     model_netG_A2B=f"netG_A2B.pth",
         #     model_netG_B2A=f"netG_B2A.pth",
