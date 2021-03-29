@@ -113,6 +113,7 @@ class RunCycleManager:
         return None
       
         print("- TO-DO: Complete the manager.end_epoch() function.")
+        print("- [TO-DO] YOLOv5 or newer to implement object detectino before")
 
         self.epoch.duration = time.time() - self.epoch.start_time
         self.run.duration = time.time() - self.run.start_time

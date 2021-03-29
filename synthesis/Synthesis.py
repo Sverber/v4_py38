@@ -74,6 +74,11 @@ class Synthesis:
             for idx, image_path in enumerate(self.paths):
 
                 """ [TO-DO] Check this """
+
+                """ [TO-DO] TOMORROW MAKE A NEW BRANCH TO ORGANIZE THE  \\
+                            PROJECT ARCHITECTURE AND IN_FILE FUNCTIONS, \\
+                                ETC. """
+
                 # Make sure that no disparity predictions are made on disparity images
                 # Obsolute now, since there are A and B folders.
                 if image_path.endswith("_disp.jpg"):

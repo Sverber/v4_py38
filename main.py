@@ -36,10 +36,10 @@ from utils.classes.StereoDisparityDataset import StereoDisparityDataset
 from utils.models.cycle.Discriminator import Discriminator
 from utils.models.cycle.Generators import Generator
 
+from test import test
 
 # Clear terminal
 os.system("cls")
-
 
 # Constants: required directories
 DIR_DATASET = f"./dataset"
@@ -47,14 +47,10 @@ DIR_OUTPUTS = f"./outputs"
 DIR_RESULTS = f"./results"
 DIR_WEIGHTS = f"./weights"
 
-
 # Constants: dataset name
-# NAME_DATASET = f"horse2zebra_000_999"
-# NAME_DATASET = f"kitti_synthesized_000_999"
-# NAME_DATASET = f"stereo_test"
 # NAME_DATASET = f"DrivingStereo_demo_images"
 # NAME_DATASET = f"Test_Set"                    # 2208 x 1242 resize by a factor 0.15 to (147, 83)
-NAME_DATASET = f"QuickDevelop"  # 2208 x 1242 resize by a factor 0.15 to (147, 83)
+NAME_DATASET = f"Test_GrayscaleRGB"  # 2208 x 1242 resize by a factor 0.15 to (147, 83)
 
 # Constants: system
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -65,8 +61,8 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 IMAGE_SIZE = (147, 83)  # Test_Set
 RATIO_CROP = 0.82
 RANDM_CROP = (int(IMAGE_SIZE[0] * RATIO_CROP), int(IMAGE_SIZE[1] * RATIO_CROP))
-SHOW_IMG_FREQ = 10
-SAVE_IMG_FREQ = 25
+SHOW_IMG_FREQ = 5
+SAVE_IMG_FREQ = 10
 
 # Configure network parameters
 PARAMETERS: OrderedDict = OrderedDict(
@@ -78,7 +74,6 @@ PARAMETERS: OrderedDict = OrderedDict(
     num_epochs=[5],
     decay_epochs=[2],
 )
-
 
 # Transformations on the datasets containing RGB stereo images
 TRANSFORMATIONS_RGB: transforms = transforms.Compose(
@@ -153,10 +148,10 @@ def train(dataset: StereoDisparityDataset):
             pass
 
         # Create Generator and Discriminator models
-        netG_A2B = Generator(in_channels=3, out_channels=3).to(run.device)
-        netG_B2A = Generator(in_channels=3, out_channels=3).to(run.device)
-        netD_A = Discriminator(in_channels=3, out_channels=3).to(run.device)
-        netD_B = Discriminator(in_channels=3, out_channels=3).to(run.device)
+        netG_A2B = Generator(in_channels=3, out_channels=1).to(run.device)      # RGB stereo --> GRAYSCALE disparity
+        netG_B2A = Generator(in_channels=1, out_channels=3).to(run.device)      # GRAYSCALE disparity --> RGB stereo
+        netD_A = Discriminator(in_channels=3, out_channels=3).to(run.device)    # RGB stereo
+        netD_B = Discriminator(in_channels=1, out_channels=1).to(run.device)    # GRAYSCALE disparity
 
         # Apply weights
         netG_A2B.apply(initialize_weights)
@@ -353,9 +348,6 @@ def train(dataset: StereoDisparityDataset):
                 """ Calculate losses for the generated (fake) output """
 
                 # Calculate the mean square error (MSE) loss
-                if i % 10 == 0: 
-                    print("--- F_I(train):", fake_image_A.size(), fake_image_B.size(), real_image_A.size(), real_image_B.size()) 
-              
                 mse_loss_A = mse_loss(fake_image_A, real_image_B)
                 mse_loss_B = mse_loss(fake_image_B, real_image_A)
 
@@ -370,8 +362,6 @@ def train(dataset: StereoDisparityDataset):
                 """ Calculate losses for the generated (fake) original images """
 
                 # Calculate the mean square error (MSE) for the generated (fake) originals A and B
-                if i % 10 == 0: 
-                    print("--- F_O(train):", fake_original_image_A.size(), fake_original_image_B.size(), real_image_A.size(), real_image_B.size())
                 mse_loss_f_or_A = mse_loss(fake_original_image_A, real_image_A)
                 mse_loss_f_or_B = mse_loss(fake_original_image_B, real_image_B)
 
@@ -541,210 +531,44 @@ def train(dataset: StereoDisparityDataset):
     # </end> def train():
 
 
-# Testing function
-def test(dataset: StereoDisparityDataset, path_to_folder: str, model_netG_A2B: str, model_netG_B2A: str) -> None:
-
-    """ Insert documentation """
-
-    # Iterate over every run, based on the configurated params
-    for run in RunCycleBuilder.get_runs(PARAMETERS):
-
-        # Store today's date in string format
-        TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
-        TODAY_TIME = datetime.today().strftime("%H.%M.%S")
-
-        # Create a unique name for this run
-        RUN_NAME = f"{TODAY_TIME}___EP{run.num_epochs}_DE{run.decay_epochs}_LR{run.learning_rate}_BS{run.batch_size}"
-        RUN_PATH = f"{NAME_DATASET}/{TODAY_DATE}/{RUN_NAME}"
-
-        # Make required directories for testing
-        try:
-            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "A"))
-            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "B"))
-        except OSError:
-            pass
-
-        # Allow cuddn to look for the optimal set of algorithms to improve runtime speed
-        cudnn.benchmark = True
-
-        # Dataloader
-        loader = DataLoader(
-            dataset=dataset, batch_size=run.batch_size, num_workers=run.num_workers, shuffle=run.shuffle
-        )
-
-        # Create model
-        netG_A2B = Generator(in_channels=3, out_channels=3).to(run.device)
-        netG_B2A = Generator(in_channels=3, out_channels=3).to(run.device)
-
-        # Load state dicts
-        netG_A2B.load_state_dict(torch.load(os.path.join(str(path_to_folder), model_netG_A2B)))
-        netG_B2A.load_state_dict(torch.load(os.path.join(str(path_to_folder), model_netG_B2A)))
-
-        # Set model mode
-        netG_A2B.eval()
-        netG_B2A.eval()
-
-        # Create progress bar
-        progress_bar = tqdm(enumerate(loader), total=len(loader))
-
-        # Initiate a mean square error (MSE) loss function
-        mse_loss = nn.MSELoss()
-
-        # Initiate mean squared error (MSE) losses variables
-        avg_mse_loss_A, avg_mse_loss_B, avg_mse_loss_f_or_A, avg_mse_loss_f_or_B = 0, 0, 0, 0
-        cum_mse_loss_A, cum_mse_loss_B, cum_mse_loss_f_or_A, cum_mse_loss_f_or_B = 0, 0, 0, 0
-
-        # Iterate over the data
-        for i, data in progress_bar:
-
-            """ (1) Read input data """
-
-            # Get image A and image B
-            real_image_A_left = data["A_left"].to(run.device)
-            real_image_A_right = data["A_right"].to(run.device)
-            real_image_B = data["B"].to(run.device)
-
-            # Concatenate left- and right view into one stereo image
-            real_image_A = torch.cat((real_image_A_left, real_image_A_right), dim=-1)
-            real_image_B = real_image_B
-
-            """ (2) Generate output """
-
-            # Generate output
-            _fake_image_A = netG_B2A(real_image_B)
-            _fake_image_B = netG_A2B(real_image_A)
-
-            # Generate original image from generated (fake) output
-            _fake_original_image_A = netG_B2A(_fake_image_B)
-            _fake_original_image_B = netG_A2B(_fake_image_A)
-
-            """ (1) Convert to usable images """
-
-            # Convert to usable images
-            fake_image_A = 0.5 * (_fake_image_A.data + 1.0)
-            fake_image_B = 0.5 * (_fake_image_B.data + 1.0)
-
-            # Convert to usable images
-            fake_original_image_A = 0.5 * (_fake_original_image_A.data + 1.0)
-            fake_original_image_B = 0.5 * (_fake_original_image_B.data + 1.0)
-
-            """ (1) Calculate losses for the generated (fake) output """
-
-            # Calculate the mean square error (MSE) loss
-            if i % 10 == 0: 
-                print("--- F_I(test):", fake_image_A.size(), fake_image_B.size(), real_image_A.size(), real_image_B.size())
-            mse_loss_A = mse_loss(fake_image_A, real_image_B)
-            mse_loss_B = mse_loss(fake_image_B, real_image_A)
-
-            # Calculate the sum of all mean square error (MSE) losses
-            cum_mse_loss_A += mse_loss_A
-            cum_mse_loss_B += mse_loss_B
-
-            # Calculate the average mean square error (MSE) loss
-            avg_mse_loss_A = cum_mse_loss_A / (i + 1)
-            avg_mse_loss_B = cum_mse_loss_B / (i + 1)
-
-            """ (1) Calculate losses for the generated (fake) original images """
-
-            # Calculate the mean square error (MSE) for the generated (fake) originals A and B
-            if i % 10 == 0: 
-                print("--- F_O(test):", fake_image_A.size(), fake_image_B.size(), real_image_A.size(), real_image_B.size())
-            mse_loss_f_or_A = mse_loss(fake_original_image_A, real_image_A)
-            mse_loss_f_or_B = mse_loss(fake_original_image_B, real_image_B)
-
-            # Calculate the average mean square error (MSE) for the fake originals A and B
-            cum_mse_loss_f_or_A += mse_loss_f_or_A
-            cum_mse_loss_f_or_B += mse_loss_f_or_B
-
-            # Calculate the average mean square error (MSE) for the fake originals A and B
-            avg_mse_loss_f_or_A = cum_mse_loss_f_or_A / (i + 1)
-            avg_mse_loss_f_or_B = cum_mse_loss_f_or_B / (i + 1)
-
-            """ (1) Define filepaths, save generated output and print a progress bar """
-
-            # Filepath and filename for the real and generated output images
-            filepath_real_A, filepath_real_B, filepath_fake_A, filepath_fake_B, filepath_f_or_A, filepath_f_or_B = (
-                f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}___real_sample.png",
-                f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}___real_sample.png",
-                f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}___fake_sample_MSE{mse_loss_A:.3f}.png",
-                f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}___fake_sample_MSE{mse_loss_B:.3f}.png",
-                f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}___fake_original_MSE{mse_loss_f_or_A:.3f}.png",
-                f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}___fake_original_MSE{mse_loss_f_or_B:.3f}.png",
-            )
-
-            # Save images
-            if i % SHOW_IMG_FREQ == 0:
-                # Save real input images
-                vutils.save_image(real_image_A.detach(), filepath_real_A, normalize=True)
-                vutils.save_image(real_image_B.detach(), filepath_real_B, normalize=True)
-
-                # Save generated (fake) output images
-                vutils.save_image(fake_image_A.detach(), filepath_fake_A, normalize=True)
-                vutils.save_image(fake_image_B.detach(), filepath_fake_B, normalize=True)
-
-                # Save generated (fake) original images
-                vutils.save_image(fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
-                vutils.save_image(fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
-
-                # Save generated (fake) original images
-                vutils.save_image(fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
-                vutils.save_image(fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
-
-            # Print a progress bar in terminal
-            progress_bar.set_description(f"Process images {i + 1} of {len(loader)}")
-
-        # Calculate average mean squared error (MSE)
-        avg_mse_loss_A = cum_mse_loss_A / len(loader)
-        avg_mse_loss_B = cum_mse_loss_B / len(loader)
-
-        # Calculate average mean squared error (MSE)
-        avg_mse_loss_f_or_A = cum_mse_loss_f_or_A / len(loader)
-        avg_mse_loss_f_or_B = cum_mse_loss_f_or_B / len(loader)
-
-        # Print
-        print("MSE(avg) A:", avg_mse_loss_A)
-        print("MSE(avg) B:", avg_mse_loss_B)
-        print("MSE(avg) A:", avg_mse_loss_f_or_A)
-        print("MSE(avg) B:", avg_mse_loss_f_or_B)
-        print("- Write a performance summary function & include more loss functions to test network performance. ")
-        print("- Calculate MSE loss for the generated originals with correct out_channels in Generators.")
-        print("- Start to organize train() into a TrainManager class or something, also for test()")
-        print("- Seperate function for loss calculation.")
-
-    # </end> def test():
-    pass
-
-
 # Execute main code
 if __name__ == "__main__":
 
     try:
+
+        """ Synthesize training data """
 
         # syn = Synthesis(mode="test")
         # syn.predict_depth()
 
 
         """ Train a neural network """
+
         dataset_train: StereoDisparityDataset = load_dataset(dir=DIR_DATASET, name=NAME_DATASET, mode="train", verbose=True)
-        train(dataset=dataset_train)
+        # train(dataset=dataset_train)
 
         """ Test a neural network """
-        dataset_test: StereoDisparityDataset = load_dataset(
-            dir=DIR_DATASET,
-            name=NAME_DATASET, mode="test", verbose=True
-        )
 
-        __DATASET, __DATE, __MODEL_NAME = (
-            f"Test_Set",
-            f"2021-03-26",
-            f"16.38.24___EP100_DE50_LR0.0002_BS1",
-        )
-        test(
-            dataset=dataset_test,
-            path_to_folder=f"{DIR_WEIGHTS}/{__DATASET}/{__DATE}/{__MODEL_NAME}",
-            model_netG_A2B=f"netG_A2B.pth",
-            model_netG_B2A=f"netG_B2A.pth",
-        )
+        # dataset_test: StereoDisparityDataset = load_dataset(
+        #     dir=DIR_DATASET,
+        #     name=NAME_DATASET, mode="test", verbose=True
+        # )
+
+        # __DATASET, __DATE, __MODEL_NAME = (
+        #     f"Test_Set",
+        #     f"2021-03-26",
+        #     f"16.38.24___EP100_DE50_LR0.0002_BS1",
+        # )
+
+        # test(
+        #     PARAMETERS=PARAMETERS,
+        #     NAME_DATASET=NAME_DATASET,
+        #     SHOW_IMG_FREQ=SHOW_IMG_FREQ,
+        #     dataset=dataset_test,
+        #     path_to_folder=f"{DIR_WEIGHTS}/{__DATASET}/{__DATE}/{__MODEL_NAME}",
+        #     model_netG_A2B=f"netG_A2B.pth",
+        #     model_netG_B2A=f"netG_B2A.pth",
+        # )
 
         pass
 
