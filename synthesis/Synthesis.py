@@ -265,7 +265,7 @@ class Synthesis:
 
         return f"<class>\n\
         Synthesis(\n\
-            file_type = .{self.MODEL_NAME},\n\
+            file_type  = {self.MODEL_NAME},\n\
             model_name = {self.MODEL_NAME},\n\
             model_root = {self.MODEL_ROOT},\n\
             num_assets = {len(self.paths)},\n\

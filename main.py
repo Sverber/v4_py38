@@ -50,15 +50,15 @@ DIR_WEIGHTS = f"./weights"
 # Constants: dataset name
 # NAME_DATASET = f"DrivingStereo_demo_images"
 # NAME_DATASET = f"Test_Set"                    # 2208 x 1242 resize by a factor 0.15 to (147, 83)
-NAME_DATASET = f"Test_GrayscaleRGB"  # 2208 x 1242 resize by a factor 0.15 to (147, 83)
+NAME_DATASET = f"Test_Set"  # 2208 x 1242 resize by a factor 0.15 to (147, 83)
 
 # Constants: system
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Constants: parameters
+# Constants: parameters, IMAGE_SIZE: [height, width]
 # IMAGE_SIZE = (122, 35) # kitti_synthesized_000_999
 # IMAGE_SIZE = (176, 79)  # DrivingStereo_demo_images
-IMAGE_SIZE = (147, 83)  # Test_Set
+IMAGE_SIZE = (83, 147)  # USASOL iamges
 RATIO_CROP = 0.82
 RANDM_CROP = (int(IMAGE_SIZE[0] * RATIO_CROP), int(IMAGE_SIZE[1] * RATIO_CROP))
 SHOW_IMG_FREQ = 5
@@ -71,8 +71,8 @@ PARAMETERS: OrderedDict = OrderedDict(
     num_workers=[4],
     learning_rate=[0.0002],
     batch_size=[1],
-    num_epochs=[5],
-    decay_epochs=[2],
+    num_epochs=[1],
+    decay_epochs=[0],
 )
 
 # Transformations on the datasets containing RGB stereo images
@@ -107,7 +107,7 @@ def load_dataset(dir: str, name: str, mode: str, verbose: bool = True) -> Stereo
 
     # Gather dataset
     dataset: StereoDisparityDataset = StereoDisparityDataset(
-        root=f"./{dir}/{name}", mode=mode, transform=TRANSFORMATIONS_RGB
+        root=f"./{dir}/{name}", mode=mode, transforms_GRAY=TRANSFORMATIONS_GRAY, transforms_RGB=TRANSFORMATIONS_RGB
     )
 
     # Print completion message if verbose is set to True
@@ -148,10 +148,10 @@ def train(dataset: StereoDisparityDataset):
             pass
 
         # Create Generator and Discriminator models
-        netG_A2B = Generator(in_channels=3, out_channels=1).to(run.device)      # RGB stereo --> GRAYSCALE disparity
-        netG_B2A = Generator(in_channels=1, out_channels=3).to(run.device)      # GRAYSCALE disparity --> RGB stereo
-        netD_A = Discriminator(in_channels=3, out_channels=3).to(run.device)    # RGB stereo
-        netD_B = Discriminator(in_channels=1, out_channels=1).to(run.device)    # GRAYSCALE disparity
+        netG_A2B = Generator(in_channels=3, out_channels=3).to(run.device)  # RGB stereo --> GRAYSCALE disparity
+        netG_B2A = Generator(in_channels=3, out_channels=3).to(run.device)  # GRAYSCALE disparity --> RGB stereo
+        netD_A = Discriminator(in_channels=3, out_channels=3).to(run.device)  # RGB stereo
+        netD_B = Discriminator(in_channels=3, out_channels=3).to(run.device)  # GRAYSCALE disparity
 
         # Apply weights
         netG_A2B.apply(initialize_weights)
@@ -208,288 +208,285 @@ def train(dataset: StereoDisparityDataset):
             # Iterate over the data loader
             for i, data in progress_bar:
 
-                # try:
+                try:
 
-                # Get image A and image B
-                real_image_A_left = data["A_left"].to(run.device)
-                real_image_A_right = data["A_right"].to(run.device)
-                real_image_B = data["B"].to(run.device)
+                    # Get image A and image B
+                    real_image_A_left = data["A_left"].to(run.device)
+                    real_image_A_right = data["A_right"].to(run.device)
+                    real_image_B = data["B"].to(run.device)
 
-                # Concatenate left- and right view into one stereo image
-                real_image_A = torch.cat((real_image_A_left, real_image_A_right), dim=-1)
-                real_image_B = real_image_B
+                    # Concatenate left- and right view into one stereo image
+                    real_image_A = torch.cat((real_image_A_left, real_image_A_right), dim=-1)
+                    real_image_B = real_image_B
 
-                # Real data label is 1, fake data label is 0.
-                real_label = torch.full((run.batch_size, 1), 1, device=run.device, dtype=torch.float32)
-                fake_label = torch.full((run.batch_size, 1), 0, device=run.device, dtype=torch.float32)
+                    # Real data label is 1, fake data label is 0.
+                    real_label = torch.full((run.batch_size, 1), 1, device=run.device, dtype=torch.float32)
+                    fake_label = torch.full((run.batch_size, 1), 0, device=run.device, dtype=torch.float32)
 
-                """ (1) Update Generator networks: A2B and B2A """
+                    """ (1) Update Generator networks: A2B and B2A """
 
-                # Zero the gradients
-                optimizer_G_A2B.zero_grad()
-                optimizer_G_B2A.zero_grad()
+                    # Zero the gradients
+                    optimizer_G_A2B.zero_grad()
+                    optimizer_G_B2A.zero_grad()
 
-                # Identity loss
-                # G_B2A(A) should equal A if real A is fed
-                identity_image_A = netG_B2A(real_image_A)
-                loss_identity_A = identity_loss(identity_image_A, real_image_A) * 5.0
+                    # Identity loss
+                    # G_B2A(A) should equal A if real A is fed
+                    print(real_image_A.size())
+                    identity_image_A = netG_B2A(real_image_A)
+                    loss_identity_A = identity_loss(identity_image_A, real_image_A) * 5.0
 
-                # G_A2B(B) should equal B if real B is fed
-                identity_image_B = netG_A2B(real_image_B)
-                loss_identity_B = identity_loss(identity_image_B, real_image_B) * 5.0
+                    # G_A2B(B) should equal B if real B is fed
+                    identity_image_B = netG_A2B(real_image_B)
+                    loss_identity_B = identity_loss(identity_image_B, real_image_B) * 5.0
 
-                # GAN loss: D_A(G_A(A))
-                fake_image_A = netG_B2A(real_image_B)
-                fake_output_A = netD_A(fake_image_A)
-                loss_GAN_B2A = adversarial_loss(fake_output_A, real_label)
-                # print("loss_GAN_B2A:", loss_GAN_B2A)
+                    # GAN loss: D_A(G_A(A))
+                    fake_image_A = netG_B2A(real_image_B)
+                    fake_output_A = netD_A(fake_image_A)
+                    loss_GAN_B2A = adversarial_loss(fake_output_A, real_label)
+                    # GAN loss: D_B(G_B(B))
 
-                # GAN loss: D_B(G_B(B))
-                fake_image_B = netG_A2B(real_image_A)
-                fake_output_B = netD_B(fake_image_B)
-                loss_GAN_A2B = adversarial_loss(fake_output_B, real_label)
-                # print("loss_GAN_A2B:", loss_GAN_A2B)
+                    fake_image_B = netG_A2B(real_image_A)
+                    fake_output_B = netD_B(fake_image_B)
+                    loss_GAN_A2B = adversarial_loss(fake_output_B, real_label)
 
-                # Cycle loss
-                recovered_image_A = netG_B2A(fake_image_B)
-                loss_cycle_ABA = cycle_loss(recovered_image_A, real_image_A) * 10.0
-                # print("loss_cycle_ABA:", loss_cycle_ABA)
+                    # Cycle loss
+                    recovered_image_A = netG_B2A(fake_image_B)
+                    loss_cycle_ABA = cycle_loss(recovered_image_A, real_image_A) * 10.0
 
-                recovered_image_B = netG_A2B(fake_image_A)
-                loss_cycle_BAB = cycle_loss(recovered_image_B, real_image_B) * 10.0
-                # print("loss_cycle_BAB:", loss_cycle_BAB)
+                    recovered_image_B = netG_A2B(fake_image_A)
+                    loss_cycle_BAB = cycle_loss(recovered_image_B, real_image_B) * 10.0
 
-                # Combined loss and calculate gradients
-                error_G = (
-                    loss_identity_A
-                    + loss_identity_B
-                    + loss_GAN_A2B
-                    + loss_GAN_B2A
-                    + loss_cycle_ABA
-                    + loss_cycle_BAB
-                )
-
-                # Calculate gradients for G_A and G_B
-                error_G.backward()
-                # print("error_G:", error_G)
-
-                # Update the Generator networks
-                optimizer_G_A2B.step()
-                optimizer_G_B2A.step()
-
-                """ (2) Update Discriminator network: A """
-
-                # Set D_A gradients to zero
-                optimizer_D_A.zero_grad()
-
-                # Real A image loss
-                real_output_A = netD_A(real_image_A)
-                error_D_real_A = adversarial_loss(real_output_A, real_label)
-
-                # Fake A image loss
-                fake_image_A = fake_A_buffer.push_and_pop(fake_image_A)
-                fake_output_A = netD_A(fake_image_A.detach())
-                error_D_fake_A = adversarial_loss(fake_output_A, fake_label)
-
-                # Combined loss and calculate gradients
-                error_D_A = (error_D_real_A + error_D_fake_A) / 2
-
-                # Calculate gradients for D_A
-                error_D_A.backward()
-                # Update D_A weights
-                optimizer_D_A.step()
-
-                """ (3) Update Discriminator network: B """
-
-                # Set D_B gradients to zero
-                optimizer_D_B.zero_grad()
-
-                # Real B image loss
-                real_output_B = netD_B(real_image_B)
-                error_D_real_B = adversarial_loss(real_output_B, real_label)
-
-                # Fake B image loss
-                fake_image_B = fake_B_buffer.push_and_pop(fake_image_B)
-                fake_output_B = netD_B(fake_image_B.detach())
-                error_D_fake_B = adversarial_loss(fake_output_B, fake_label)
-
-                # Combined loss and calculate gradients
-                error_D_B = (error_D_real_B + error_D_fake_B) / 2
-
-                # Calculate gradients for D_B
-                error_D_B.backward()
-
-                # Update D_B weights
-                optimizer_D_B.step()
-
-                """ (4) Network losses and input data regeneration """
-
-                # Initiate a mean square error (MSE) loss function
-                mse_loss = nn.MSELoss()
-
-                """ Convert the tensors to usable image arrays """
-
-                # Generate output
-                _fake_image_A = netG_B2A(real_image_B)
-                _fake_image_B = netG_A2B(real_image_A)
-
-                # Generate original image from generated (fake) output
-                _fake_original_image_A = netG_B2A(_fake_image_B)
-                _fake_original_image_B = netG_A2B(_fake_image_A)
-
-                # Convert to usable images
-                fake_image_A = 0.5 * (_fake_image_A.data + 1.0)
-                fake_image_B = 0.5 * (_fake_image_B.data + 1.0)
-
-                # Convert to usable images
-                fake_original_image_A = 0.5 * (_fake_original_image_A.data + 1.0)
-                fake_original_image_B = 0.5 * (_fake_original_image_B.data + 1.0)
-
-                """ Calculate losses for the generated (fake) output """
-
-                # Calculate the mean square error (MSE) loss
-                mse_loss_A = mse_loss(fake_image_A, real_image_B)
-                mse_loss_B = mse_loss(fake_image_B, real_image_A)
-
-                # Calculate the sum of all mean square error (MSE) losses
-                cum_mse_loss_A += mse_loss_A
-                cum_mse_loss_B += mse_loss_B
-
-                # Calculate the average mean square error (MSE) loss
-                avg_mse_loss_A = cum_mse_loss_A / (i + 1)
-                avg_mse_loss_B = cum_mse_loss_B / (i + 1)
-
-                """ Calculate losses for the generated (fake) original images """
-
-                # Calculate the mean square error (MSE) for the generated (fake) originals A and B
-                mse_loss_f_or_A = mse_loss(fake_original_image_A, real_image_A)
-                mse_loss_f_or_B = mse_loss(fake_original_image_B, real_image_B)
-
-                # Calculate the average mean square error (MSE) for the fake originals A and B
-                cum_mse_loss_f_or_A += mse_loss_f_or_A
-                cum_mse_loss_f_or_B += mse_loss_f_or_B
-
-                # Calculate the average mean square error (MSE) for the fake originals A and B
-                avg_mse_loss_f_or_A = cum_mse_loss_f_or_A / (i + 1)
-                avg_mse_loss_f_or_B = cum_mse_loss_f_or_B / (i + 1)
-
-                """ (5) Save all generated network output and """
-
-                def __save_realtime_output(_output_path=f"{DIR_OUTPUTS}/{RUN_PATH}") -> None:
-
-                    # Filepath and filename for the real-time output images
-                    (
-                        filepath_real_A,
-                        filepath_real_B,
-                        filepath_fake_A,
-                        filepath_fake_B,
-                        filepath_f_or_A,
-                        filepath_f_or_B,
-                    ) = (
-                        f"{_output_path}/A/real_sample.png",
-                        f"{_output_path}/B/real_sample.png",
-                        f"{_output_path}/A/fake_sample.png",
-                        f"{_output_path}/B/fake_sample.png",
-                        f"{_output_path}/A/fake_original.png",
-                        f"{_output_path}/B/fake_original.png",
-                    )
-                    # Save real input images
-                    vutils.save_image(real_image_A, filepath_real_A, normalize=True)
-                    vutils.save_image(real_image_B, filepath_real_B, normalize=True)
-
-                    # Save the generated (fake) image
-                    vutils.save_image(fake_image_A.detach(), filepath_fake_A, normalize=True)
-                    vutils.save_image(fake_image_B.detach(), filepath_fake_B, normalize=True)
-
-                    # Save the generated (fake) original images
-                    vutils.save_image(fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
-                    vutils.save_image(fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
-
-                    pass
-
-                def __save_end_epoch_output(_output_path=f"{DIR_OUTPUTS}/{RUN_PATH}"):
-
-                    # Filepath and filename for the per-epoch output images
-                    (
-                        filepath_real_A,
-                        filepath_real_B,
-                        filepath_fake_A,
-                        filepath_fake_B,
-                        filepath_f_or_A,
-                        filepath_f_or_B,
-                    ) = (
-                        f"{_output_path}/A/epochs/EP{epoch}___real_sample.png",
-                        f"{_output_path}/B/epochs/EP{epoch}___real_sample.png",
-                        f"{_output_path}/A/epochs/EP{epoch}___fake_sample_MSE{mse_loss_A:.3f}.png",
-                        f"{_output_path}/B/epochs/EP{epoch}___fake_sample_MSE{mse_loss_B:.3f}.png",
-                        f"{_output_path}/A/epochs/EP{epoch}___fake_original_MSE{avg_mse_loss_A:.3f}.png",
-                        f"{_output_path}/B/epochs/EP{epoch}___fake_original_MSE{avg_mse_loss_B:.3f}.png",
+                    # Combined loss and calculate gradients
+                    error_G = (
+                        loss_identity_A
+                        + loss_identity_B
+                        + loss_GAN_A2B
+                        + loss_GAN_B2A
+                        + loss_cycle_ABA
+                        + loss_cycle_BAB
                     )
 
-                    # Save real input images
-                    vutils.save_image(real_image_A, filepath_real_A, normalize=True)
-                    vutils.save_image(real_image_B, filepath_real_B, normalize=True)
+                    # Calculate gradients for G_A and G_B
+                    error_G.backward()
 
-                    # Save the generated (fake) image
-                    vutils.save_image(fake_image_A.detach(), filepath_fake_A, normalize=True)
-                    vutils.save_image(fake_image_B.detach(), filepath_fake_B, normalize=True)
+                    # Update the Generator networks
+                    optimizer_G_A2B.step()
+                    optimizer_G_B2A.step()
 
-                    # Save the generated (fake) original images
-                    vutils.save_image(fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
-                    vutils.save_image(fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
+                    """ (2) Update Discriminator network: A """
 
+                    # Set D_A gradients to zero
+                    optimizer_D_A.zero_grad()
+
+                    # Real A image loss
+                    real_output_A = netD_A(real_image_A)
+                    error_D_real_A = adversarial_loss(real_output_A, real_label)
+
+                    # Fake A image loss
+                    fake_image_A = fake_A_buffer.push_and_pop(fake_image_A)
+                    fake_output_A = netD_A(fake_image_A.detach())
+                    error_D_fake_A = adversarial_loss(fake_output_A, fake_label)
+
+                    # Combined loss and calculate gradients
+                    error_D_A = (error_D_real_A + error_D_fake_A) / 2
+
+                    # Calculate gradients for D_A
+                    error_D_A.backward()
+
+                    # Update D_A weights
+                    optimizer_D_A.step()
+
+                    """ (3) Update Discriminator network: B """
+
+                    # Set D_B gradients to zero
+                    optimizer_D_B.zero_grad()
+
+                    # Real B image loss
+                    real_output_B = netD_B(real_image_B)
+                    error_D_real_B = adversarial_loss(real_output_B, real_label)
+
+                    # Fake B image loss
+                    fake_image_B = fake_B_buffer.push_and_pop(fake_image_B)
+                    fake_output_B = netD_B(fake_image_B.detach())
+                    error_D_fake_B = adversarial_loss(fake_output_B, fake_label)
+
+                    # Combined loss and calculate gradients
+                    error_D_B = (error_D_real_B + error_D_fake_B) / 2
+
+                    # Calculate gradients for D_B
+                    error_D_B.backward()
+
+                    # Update D_B weights
+                    optimizer_D_B.step()
+
+                    """ (4) Network losses and input data regeneration """
+
+                    # Initiate a mean square error (MSE) loss function
+                    mse_loss = nn.MSELoss()
+
+                    """ Convert the tensors to usable image arrays """
+
+                    # Generate output
+                    _fake_image_A = netG_B2A(real_image_B)
+                    _fake_image_B = netG_A2B(real_image_A)
+
+                    # Generate original image from generated (fake) output
+                    _fake_original_image_A = netG_B2A(_fake_image_B)
+                    _fake_original_image_B = netG_A2B(_fake_image_A)
+
+                    # Convert to usable images
+                    fake_image_A = 0.5 * (_fake_image_A.data + 1.0)
+                    fake_image_B = 0.5 * (_fake_image_B.data + 1.0)
+
+                    # Convert to usable images
+                    fake_original_image_A = 0.5 * (_fake_original_image_A.data + 1.0)
+                    fake_original_image_B = 0.5 * (_fake_original_image_B.data + 1.0)
+
+                    """ Calculate losses for the generated (fake) output """
+
+                    # Calculate the mean square error (MSE) loss
+                    mse_loss_A = mse_loss(fake_image_A, real_image_B)
+                    mse_loss_B = mse_loss(fake_image_B, real_image_A)
+
+                    # Calculate the sum of all mean square error (MSE) losses
+                    cum_mse_loss_A += mse_loss_A
+                    cum_mse_loss_B += mse_loss_B
+
+                    # Calculate the average mean square error (MSE) loss
+                    avg_mse_loss_A = cum_mse_loss_A / (i + 1)
+                    avg_mse_loss_B = cum_mse_loss_B / (i + 1)
+
+                    """ Calculate losses for the generated (fake) original images """
+
+                    # Calculate the mean square error (MSE) for the generated (fake) originals A and B
+                    mse_loss_f_or_A = mse_loss(fake_original_image_A, real_image_A)
+                    mse_loss_f_or_B = mse_loss(fake_original_image_B, real_image_B)
+
+                    # Calculate the average mean square error (MSE) for the fake originals A and B
+                    cum_mse_loss_f_or_A += mse_loss_f_or_A
+                    cum_mse_loss_f_or_B += mse_loss_f_or_B
+
+                    # Calculate the average mean square error (MSE) for the fake originals A and B
+                    avg_mse_loss_f_or_A = cum_mse_loss_f_or_A / (i + 1)
+                    avg_mse_loss_f_or_B = cum_mse_loss_f_or_B / (i + 1)
+
+                    """ (5) Save all generated network output and """
+
+                    def __save_realtime_output(_output_path=f"{DIR_OUTPUTS}/{RUN_PATH}") -> None:
+
+                        # Filepath and filename for the real-time output images
+                        (
+                            filepath_real_A,
+                            filepath_real_B,
+                            filepath_fake_A,
+                            filepath_fake_B,
+                            filepath_f_or_A,
+                            filepath_f_or_B,
+                        ) = (
+                            f"{_output_path}/A/real_sample.png",
+                            f"{_output_path}/B/real_sample.png",
+                            f"{_output_path}/A/fake_sample.png",
+                            f"{_output_path}/B/fake_sample.png",
+                            f"{_output_path}/A/fake_original.png",
+                            f"{_output_path}/B/fake_original.png",
+                        )
+                        # Save real input images
+                        vutils.save_image(real_image_A, filepath_real_A, normalize=True)
+                        vutils.save_image(real_image_B, filepath_real_B, normalize=True)
+
+                        # Save the generated (fake) image
+                        vutils.save_image(fake_image_A.detach(), filepath_fake_A, normalize=True)
+                        vutils.save_image(fake_image_B.detach(), filepath_fake_B, normalize=True)
+
+                        # Save the generated (fake) original images
+                        vutils.save_image(fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
+                        vutils.save_image(fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
+
+                        pass
+
+                    def __save_end_epoch_output(_output_path=f"{DIR_OUTPUTS}/{RUN_PATH}"):
+
+                        # Filepath and filename for the per-epoch output images
+                        (
+                            filepath_real_A,
+                            filepath_real_B,
+                            filepath_fake_A,
+                            filepath_fake_B,
+                            filepath_f_or_A,
+                            filepath_f_or_B,
+                        ) = (
+                            f"{_output_path}/A/epochs/EP{epoch}___real_sample.png",
+                            f"{_output_path}/B/epochs/EP{epoch}___real_sample.png",
+                            f"{_output_path}/A/epochs/EP{epoch}___fake_sample_MSE{mse_loss_A:.3f}.png",
+                            f"{_output_path}/B/epochs/EP{epoch}___fake_sample_MSE{mse_loss_B:.3f}.png",
+                            f"{_output_path}/A/epochs/EP{epoch}___fake_original_MSE{avg_mse_loss_A:.3f}.png",
+                            f"{_output_path}/B/epochs/EP{epoch}___fake_original_MSE{avg_mse_loss_B:.3f}.png",
+                        )
+
+                        # Save real input images
+                        vutils.save_image(real_image_A, filepath_real_A, normalize=True)
+                        vutils.save_image(real_image_B, filepath_real_B, normalize=True)
+
+                        # Save the generated (fake) image
+                        vutils.save_image(fake_image_A.detach(), filepath_fake_A, normalize=True)
+                        vutils.save_image(fake_image_B.detach(), filepath_fake_B, normalize=True)
+
+                        # Save the generated (fake) original images
+                        vutils.save_image(fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
+                        vutils.save_image(fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
+
+                        pass
+
+                    def __print_progress() -> None:
+
+                        """ 
+                            
+                            # L_D(A)                = Loss discriminator A
+                            # L_D(B)                = Loss discriminator B
+                            # L_G(A2B)              = Loss generator A2B
+                            # L_G(B2A)              = Loss generator B2A
+                            # L_G_ID                = Combined oentity loss generators A2B + B2A
+                            # L_G_GAN               = Combined GAN loss generators A2B + B2A
+                            # L_G_CYCLE             = Combined cycle consistency loss Generators A2B + B2A
+                            # G(A2B)_MSE(avg)       = Mean square error (MSE) loss over the generated output B vs. the real image A
+                            # G(B2A)_MSE(avg)       = Mean square error (MSE) loss over the generated output A vs. the real image B
+                            # G(A2B2A)_MSE(avg)     = Average mean square error (MSE) loss over the generated original image A vs. the real image A
+                            # G(B2A2B)_MSE(avg)     = Average mean square error (MSE) loss over the generated original image B vs. the real image B
+
+                        """
+
+                        progress_bar.set_description(
+                            f"[{epoch + 1}/{run.num_epochs}][{i + 1}/{len(loader)}] "
+                            # f"L_D(A): {error_D_A.item():.2f} "
+                            # f"L_D(B): {error_D_B.item():.2f} | "
+                            f"L_D(A+B): {((error_D_A + error_D_B) / 2).item():.2f} | "
+                            f"L_G(A2B): {loss_GAN_A2B.item():.2f} "
+                            f"L_G(B2A): {loss_GAN_B2A.item():.2f} | "
+                            # f"L_G_ID: {(loss_identity_A + loss_identity_B).item():.2f} "
+                            # f"L_G_GAN: {(loss_GAN_A2B + loss_GAN_B2A).item():.2f} "
+                            # f"L_G_CYCLE: {(loss_cycle_ABA + loss_cycle_BAB).item():.2f} "
+                            f"G(A2B)_MSE(avg): {(avg_mse_loss_A).item():.2f} "
+                            f"G(B2A)_MSE(avg): {(avg_mse_loss_B).item():.2f} | "
+                            f"G(A2B2A)_MSE(avg): {(avg_mse_loss_f_or_A).item():.2f} "
+                            f"G(B2A2B)_MSE(avg): {(avg_mse_loss_f_or_B).item():.2f} "
+                        )
+
+                        pass
+
+                    # Save the real-time output images for every {SHOW_IMG_FREQ} images
+                    if i % SHOW_IMG_FREQ == 0:
+                        __save_realtime_output(_output_path=f"{DIR_OUTPUTS}/{RUN_PATH}")
+
+                    # Save the network weights at the end of the epoch
+                    if i + 1 == len(loader) and epoch % SAVE_IMG_FREQ == 0:
+                        __save_end_epoch_output(_output_path=f"{DIR_OUTPUTS}/{RUN_PATH}")
+
+                    # Print a progress bar in the terminal
+                    __print_progress()
+
+                except Exception as e:
+                    print(e)
                     pass
-
-                def __print_progress() -> None:
-
-                    """ 
-                        
-                        # L_D(A)                = Loss discriminator A
-                        # L_D(B)                = Loss discriminator B
-                        # L_G(A2B)              = Loss generator A2B
-                        # L_G(B2A)              = Loss generator B2A
-                        # L_G_ID                = Combined oentity loss generators A2B + B2A
-                        # L_G_GAN               = Combined GAN loss generators A2B + B2A
-                        # L_G_CYCLE             = Combined cycle consistency loss Generators A2B + B2A
-                        # G(A2B)_MSE(avg)       = Mean square error (MSE) loss over the generated output B vs. the real image A
-                        # G(B2A)_MSE(avg)       = Mean square error (MSE) loss over the generated output A vs. the real image B
-                        # G(A2B2A)_MSE(avg)     = Average mean square error (MSE) loss over the generated original image A vs. the real image A
-                        # G(B2A2B)_MSE(avg)     = Average mean square error (MSE) loss over the generated original image B vs. the real image B
-
-                    """
-
-                    progress_bar.set_description(
-                        f"[{epoch + 1}/{run.num_epochs}][{i + 1}/{len(loader)}] "
-                        # f"L_D(A): {error_D_A.item():.2f} "
-                        # f"L_D(B): {error_D_B.item():.2f} | "
-                        f"L_D(A+B): {((error_D_A + error_D_B) / 2).item():.2f} | "
-                        f"L_G(A2B): {loss_GAN_A2B.item():.2f} "
-                        f"L_G(B2A): {loss_GAN_B2A.item():.2f} | "
-                        # f"L_G_ID: {(loss_identity_A + loss_identity_B).item():.2f} "
-                        # f"L_G_GAN: {(loss_GAN_A2B + loss_GAN_B2A).item():.2f} "
-                        # f"L_G_CYCLE: {(loss_cycle_ABA + loss_cycle_BAB).item():.2f} "
-                        f"G(A2B)_MSE(avg): {(avg_mse_loss_A).item():.2f} "
-                        f"G(B2A)_MSE(avg): {(avg_mse_loss_B).item():.2f} | "
-                        f"G(A2B2A)_MSE(avg): {(avg_mse_loss_f_or_A).item():.2f} "
-                        f"G(B2A2B)_MSE(avg): {(avg_mse_loss_f_or_B).item():.2f} "
-                    )
-
-                    pass
-
-                # Save the real-time output images for every {SHOW_IMG_FREQ} images
-                if i % SHOW_IMG_FREQ == 0:
-                    __save_realtime_output(_output_path=f"{DIR_OUTPUTS}/{RUN_PATH}")
-
-                # Save the network weights at the end of the epoch
-                if i + 1 == len(loader) and epoch % SAVE_IMG_FREQ == 0:
-                    __save_end_epoch_output(_output_path=f"{DIR_OUTPUTS}/{RUN_PATH}")
-
-                # Print a progress bar in the terminal
-                # __print_progress()"
-
-                # except Exception as e:
-                #     print(e)
-                #     pass
 
             """ </for> for i, data in progress_bar: """
 
@@ -541,11 +538,12 @@ if __name__ == "__main__":
         # syn = Synthesis(mode="test")
         # syn.predict_depth()
 
-
         """ Train a neural network """
 
-        dataset_train: StereoDisparityDataset = load_dataset(dir=DIR_DATASET, name=NAME_DATASET, mode="train", verbose=True)
-        # train(dataset=dataset_train)
+        dataset_train: StereoDisparityDataset = load_dataset(
+            dir=DIR_DATASET, name=NAME_DATASET, mode="train", verbose=True
+        )
+        train(dataset=dataset_train)
 
         """ Test a neural network """
 
