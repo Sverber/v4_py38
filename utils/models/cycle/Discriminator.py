@@ -93,7 +93,12 @@ class Discriminator(nn.Module):
             nn.Conv2d(in_channels=512, out_channels=self.out_channels, kernel_size=(4, 4), padding=1),
         )
 
-    def forward(self, x):
+    def forward(self, x, domain_transfer):
+     
+        given_channels = x[0].size()[0]
+        
+        # print(f"[D] - {domain_transfer}, given_channels={given_channels}, self.in={self.in_channels}, self.out={self.out_channels}")
+     
         x = self.main(x)
         x = F.avg_pool2d(x, x.size()[2:])
         x = torch.flatten(x, 1)

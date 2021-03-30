@@ -27,9 +27,9 @@ class StereoDisparityDataset(Dataset):
         self.raw_disparity = sorted(glob.glob(os.path.join(root, f"{mode}/B") + "/*.*"))
 
         # Transform grayscale images to grayscale RGB
-        self.__transform_CHANNELS2RGB(files=self.raw_stereo_l, image_type="left")
-        self.__transform_CHANNELS2RGB(files=self.raw_stereo_r, image_type="right")
-        self.__transform_CHANNELS2RGB(files=self.raw_disparity, image_type="depth")
+        self.__transform_CHANNELS2GRAY(files=self.raw_stereo_l, image_type="left")
+        self.__transform_CHANNELS2GRAY(files=self.raw_stereo_r, image_type="right")
+        self.__transform_CHANNELS2GRAY(files=self.raw_disparity, image_type="depth")
 
         # Import files again, some may have been transformed in the prior step
         self.stereo_l = sorted(glob.glob(os.path.join(root, f"{mode}/A/left") + "/*.*"))
@@ -48,7 +48,7 @@ class StereoDisparityDataset(Dataset):
 
                 # Check channels and if not 3 (RGB), convert to RGB and save
                 if image_rgb_tensor.shape[0] != 3:
-                    print(f"- Found a non-RGB '{image_type}'' image, converting it to a 3 CHANNEL RGB image.")
+                    print(f"- Found a non-RGB '{image_type}' image, converting it to a 3 CHANNEL RGB image.")
                     image_rgb = Image.open(filepath).convert("RGB")
                     image_rgb.save(filepath)
 
@@ -78,8 +78,8 @@ class StereoDisparityDataset(Dataset):
 
     def __getitem__(self, index):
 
-        item_A_l = self.transform_RGB(Image.open(self.stereo_l[index % len(self.stereo_l)]))
-        item_A_r = self.transform_RGB(Image.open(self.stereo_r[index % len(self.stereo_r)]))
+        item_A_l = self.transform_GRAY(Image.open(self.stereo_l[index % len(self.stereo_l)]))
+        item_A_r = self.transform_GRAY(Image.open(self.stereo_r[index % len(self.stereo_r)]))
         disparity = self.transform_GRAY(Image.open(self.disparity[index % len(self.disparity)]))
 
         return {"A_left": item_A_l, "A_right": item_A_r, "B": disparity}
