@@ -65,7 +65,7 @@ class Generator(nn.Module):
 
     """ Insert documentation """
 
-    def __init__(self, in_channels: int, out_channels: int):
+    def __init__(self, in_channels: int = 1, out_channels: int = 1):
 
         super().__init__()
 
@@ -122,122 +122,25 @@ class Generator(nn.Module):
             nn.Tanh(),
         )
 
-        self.main_A2A = nn.Sequential(
-            #
-            # Input layer
-            #
-            nn.ReflectionPad2d(3),
-            nn.Conv2d(in_channels=self.out_channels, out_channels=64, kernel_size=(7, 7)),
-            nn.InstanceNorm2d(num_features=64),
-            nn.ReLU(inplace=True),
-            #
-            # Downsampling
-            #
-            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=(3, 3), stride=2, padding=1),
-            nn.InstanceNorm2d(num_features=128),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=(3, 3), stride=2, padding=1),
-            nn.InstanceNorm2d(num_features=256),
-            nn.ReLU(inplace=True),
-            #
-            # Residual blocks
-            #
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            #
-            # Upsampling
-            #
-            nn.ConvTranspose2d(
-                in_channels=256, out_channels=128, kernel_size=(3, 3), stride=2, padding=1, output_padding=1
-            ),
-            nn.InstanceNorm2d(num_features=128),
-            nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(
-                in_channels=128, out_channels=64, kernel_size=(3, 3), stride=2, padding=1, output_padding=1
-            ),
-            nn.InstanceNorm2d(num_features=64),
-            nn.ReLU(inplace=True),
-            #
-            # Output layer
-            #
-            nn.ReflectionPad2d(3),
-            nn.Conv2d(in_channels=64, out_channels=self.out_channels, kernel_size=(7, 7)),
-            nn.Tanh(),
-        )
-        self.main_B2B = nn.Sequential(
-            #
-            # Input layer
-            #
-            nn.ReflectionPad2d(3),
-            nn.Conv2d(in_channels=self.out_channels, out_channels=64, kernel_size=(7, 7)),
-            nn.InstanceNorm2d(num_features=64),
-            nn.ReLU(inplace=True),
-            #
-            # Downsampling
-            #
-            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=(3, 3), stride=2, padding=1),
-            nn.InstanceNorm2d(num_features=128),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=(3, 3), stride=2, padding=1),
-            nn.InstanceNorm2d(num_features=256),
-            nn.ReLU(inplace=True),
-            #
-            # Residual blocks
-            #
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            ResidualBlock(in_channels=256),
-            #
-            # Upsampling
-            #
-            nn.ConvTranspose2d(
-                in_channels=256, out_channels=128, kernel_size=(3, 3), stride=2, padding=1, output_padding=1
-            ),
-            nn.InstanceNorm2d(num_features=128),
-            nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(
-                in_channels=128, out_channels=64, kernel_size=(3, 3), stride=2, padding=1, output_padding=1
-            ),
-            nn.InstanceNorm2d(num_features=64),
-            nn.ReLU(inplace=True),
-            #
-            # Output layer
-            #
-            nn.ReflectionPad2d(3),
-            nn.Conv2d(in_channels=64, out_channels=self.out_channels, kernel_size=(7, 7)),
-            nn.Tanh(),
-        )
-
     def forward(self, x, domain_transfer):
 
         """ Insert documentation """
+        
+        return self.main(x)
 
-        given_channels = x[0].size()[0]
-        inversed_input = self.in_channels != given_channels
+        # given_channels = x[0].size()[0]
+        # inversed_input = self.in_channels != given_channels
 
-        # print(f"[G] - {domain_transfer}, given_channels={given_channels}, self.in={self.in_channels}, self.out={self.out_channels}")
+        # # print(f"[G] - {domain_transfer}, given_channels={given_channels}, self.in={self.in_channels}, self.out={self.out_channels}")
 
-        if domain_transfer == ("A2B" or "B2A"):
-            return self.main(x)
-        elif domain_transfer == "A2A":
-            return self.main_A2A(x)
-        elif domain_transfer == "B2B":
-            return self.main_B2B(x)
-        else:
-            return self.main(x)
+        # if domain_transfer == ("A2B" or "B2A"):
+        #     return self.main(x)
+        # elif domain_transfer == "A2A":
+        #     return self.main_A2A(x)
+        # elif domain_transfer == "B2B":
+        #     return self.main_B2B(x)
+        # else:
+        #     return self.main(x)
 
 # class OneToMultiGenerator(nn.Module):
 

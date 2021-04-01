@@ -7,7 +7,6 @@ class __Discriminator(nn.Module):
 
     """ Insert documentation """
 
-
     def __init__(self, in_channels: int = 3, out_channels: int = 3):
 
         super().__init__()
@@ -56,7 +55,7 @@ class Discriminator(nn.Module):
 
     """ Insert documentation """
 
-    def __init__(self, in_channels: int = 3, out_channels: int = 3):
+    def __init__(self, in_channels: int = 1, out_channels: int = 1):
 
         super().__init__()
 
@@ -94,11 +93,7 @@ class Discriminator(nn.Module):
         )
 
     def forward(self, x, domain_transfer):
-     
-        given_channels = x[0].size()[0]
-        
-        # print(f"[D] - {domain_transfer}, given_channels={given_channels}, self.in={self.in_channels}, self.out={self.out_channels}")
-     
+
         x = self.main(x)
         x = F.avg_pool2d(x, x.size()[2:])
         x = torch.flatten(x, 1)
