@@ -16,16 +16,11 @@ class LeftRightDataset(Dataset):
     """ Insert documentation for LeftRightDataset class """
 
     def __init__(
-        self,
-        root,
-        mode: str = "train",
-        transforms_GRAY: transforms = None,
-        transforms_RGB: transforms = None,
+        self, root, mode: str = "train", transforms: transforms = None,
     ):
 
         # Get transformation and alignment
-        self.transform_GRAY = transforms_GRAY
-        self.transform_RGB = transforms_RGB
+        self.transforms = transforms
 
         # Sort stereo left/right and corresponding disparity
         self.raw_stereo_l = sorted(glob.glob(os.path.join(root, f"{mode}/left") + "/*.*"))
@@ -81,8 +76,8 @@ class LeftRightDataset(Dataset):
 
     def __getitem__(self, index):
 
-        item_left = self.transform_GRAY(Image.open(self.stereo_l[index % len(self.stereo_l)]))
-        item_right = self.transform_GRAY(Image.open(self.stereo_r[index % len(self.stereo_r)]))
+        item_left = self.transforms(Image.open(self.stereo_l[index % len(self.stereo_l)]))
+        item_right = self.transforms(Image.open(self.stereo_r[index % len(self.stereo_r)]))
 
         return {"left": item_left, "right": item_right}
 

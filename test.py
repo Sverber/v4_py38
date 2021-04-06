@@ -47,7 +47,7 @@ DIR_WEIGHTS = f"./weights"
 # Testing function
 def test(
     PARAMETERS: OrderedDict,
-    NAME_DATASET: str,
+    NAME_S2D_DATASET: str,
     SHOW_IMG_FREQ: int,
     dataset: StereoDisparityDataset,
     path_to_folder: str,
@@ -66,7 +66,7 @@ def test(
 
         # Create a unique name for this run
         RUN_NAME = f"{TODAY_TIME}___EP{run.num_epochs}_DE{run.decay_epochs}_LR{run.learning_rate}_BS{run.batch_size}"
-        RUN_PATH = f"{NAME_DATASET}/{TODAY_DATE}/{RUN_NAME}"
+        RUN_PATH = f"{NAME_S2D_DATASET}/{TODAY_DATE}/{RUN_NAME}"
 
         # Make required directories for testing
         try:

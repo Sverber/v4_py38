@@ -39,6 +39,8 @@ from utils.classes.StereoDisparityDataset import StereoDisparityDataset
 from utils.models.cycle.Discriminator import Discriminator
 from utils.models.cycle.Generators import Generator
 
+from dataloaders import MyDataLoader, MyDataWrapper, Left2RightDataset, Stereo2DisparityDataset
+
 from test import test
 
 # Clear terminal
@@ -57,20 +59,21 @@ DIR_S2D_RESULTS = f"./results/s2d"
 DIR_S2D_WEIGHTS = f"./weights/s2d"
 
 # Constants: dataset name
-# NAME_DATASET = f"kitti_synthesized_000_999"
-# NAME_DATASET = f"DrivingStereo_demo_images"
-# NAME_DATASET = f"QuickDevelop" # 1242 x 2208 resize by a factor /15 to (83, 147) | (y, x)
-# NAME_DATASET = f"Test_GrayscaleRGB"  # 1242 x 2208 resize by a factor /15 to (83, 147) | (y, x)
-NAME_DATASET = f"Test_Set_Inverted_Colours"  # 1242 x 2208 resize by a factor /15 to (83, 147) | (y, x)
+# NAME_S2D_DATASET = f"kitti_synthesized_000_999"
+# NAME_S2D_DATASET = f"DrivingStereo_demo_images"
+# NAME_S2D_DATASET = f"QuickDevelop" # 1242 x 2208 resize by a factor /15 to (83, 147) | (y, x)
+# NAME_S2D_DATASET = f"Test_GrayscaleRGB"  # 1242 x 2208 resize by a factor /15 to (83, 147) | (y, x)
+NAME_S2D_DATASET = f"Test_Set_RGB_Original"  # 1242 x 2208 resize by a factor /15 to (83, 147) | (y, x)
+NAME_L2R_DATASET = f"Test_Set"
 
 # Constants: system and reproducibility
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MANUAL_SEED = 999
+CHANNELS = 3
 
 # Constants: parameters, IMAGE_SIZE: [height, width]
-# IMAGE_SIZE = (122, 35) # kitti_synthesized_000_999
-# IMAGE_SIZE = (176, 79)  # DrivingStereo_demo_images
-# IMAGE_SIZE = (99, 177)  # USASOL images factor /12.5 ~ (99.3; 176.6)
+# IMAGE_SIZE = (122, 35)    # kitti_synthesized_000_999
+# IMAGE_SIZE = (176, 79)    # DrivingStereo_demo_images
 IMAGE_SIZE = (83, 147)  # USASOL images factor /15
 RATIO_CROP = 0.82
 RANDM_CROP = (int(IMAGE_SIZE[0] * RATIO_CROP), int(IMAGE_SIZE[1] * RATIO_CROP))
@@ -93,7 +96,7 @@ PARAMETERS: OrderedDict = OrderedDict(
     learning_rate=[0.0002],
     batch_size=[1],
     num_epochs=[30],
-    decay_epochs=[15],  # Decays from x-4 to x-6 over the remainder of epochs
+    decay_epochs=[20],
 )
 
 # Transformations on the datasets containing RGB stereo images
@@ -101,7 +104,6 @@ TRANSFORMATIONS_RGB: transforms = transforms.Compose(
     [
         transforms.Resize(size=IMAGE_SIZE, interpolation=Image.BICUBIC),
         transforms.RandomCrop(size=RANDM_CROP),
-        transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
     ]
@@ -112,7 +114,6 @@ TRANSFORMATIONS_GRAY: transforms = transforms.Compose(
     [
         transforms.Resize(size=IMAGE_SIZE, interpolation=Image.BICUBIC),
         transforms.RandomCrop(size=RANDM_CROP),
-        transforms.RandomHorizontalFlip(),
         transforms.Grayscale(num_output_channels=1),
         transforms.ToTensor(),
         transforms.Normalize(mean=(0.5), std=(0.5)),
@@ -121,20 +122,14 @@ TRANSFORMATIONS_GRAY: transforms = transforms.Compose(
 
 
 # Load a stereo2disparity dataset
-def load_dataset_stereo2disparity(
-    dir: str, name: str, mode: str, verbose: bool = True, invert_colours: bool = False
-) -> StereoDisparityDataset:
+def load_dataset_stereo2disparity(dir: str, name: str, mode: str, verbose: bool = True) -> StereoDisparityDataset:
 
     # Print start message if verbose is set to True
     verbose is True if print(f"Gathering the '{mode}' dataset of '{dir}/{name}'") else None
 
     # Gather dataset
     dataset: StereoDisparityDataset = StereoDisparityDataset(
-        root=f"./{dir}/{name}",
-        mode=mode,
-        transforms_GRAY=TRANSFORMATIONS_GRAY,
-        transforms_RGB=TRANSFORMATIONS_RGB,
-        invert_colours=invert_colours,
+        root=f"./{dir}/{name}", mode=mode, transforms=TRANSFORMATIONS_RGB
     )
 
     # Print completion message if verbose is set to True
@@ -149,9 +144,7 @@ def load_dataset_left2right(dir: str, name: str, mode: str, verbose: bool = True
     verbose is True if print(f"Gathering the '{mode}' dataset of '{name}'") else None
 
     # Gather dataset
-    dataset: LeftRightDataset = LeftRightDataset(
-        root=f"./{dir}/{name}", mode=mode, transforms_GRAY=TRANSFORMATIONS_GRAY, transforms_RGB=TRANSFORMATIONS_RGB
-    )
+    dataset: LeftRightDataset = LeftRightDataset(root=f"./{dir}/{name}", mode=mode, transforms=TRANSFORMATIONS_RGB)
 
     # Print completion message if verbose is set to True
     verbose is True if print(f"Loaded the '{mode}' dataset of '{name}' of length: {len(dataset)}") else None
@@ -159,7 +152,7 @@ def load_dataset_left2right(dir: str, name: str, mode: str, verbose: bool = True
 
 
 # Training function stereo2disparity
-def train_stereo2disparity(dataset: StereoDisparityDataset):
+def train_stereo2disparity(dataset: StereoDisparityDataset, dataset_name: str):
 
     """ Insert documentation """
 
@@ -181,7 +174,7 @@ def train_stereo2disparity(dataset: StereoDisparityDataset):
 
         # Create a unique name for this run
         RUN_NAME = f"{TODAY_TIME}___EP{run.num_epochs}_DE{run.decay_epochs}_LR{run.learning_rate}_BS{run.batch_size}"
-        RUN_PATH = f"{NAME_DATASET}/{TODAY_DATE}/{RUN_NAME}"
+        RUN_PATH = f"{dataset_name}/{TODAY_DATE}/{RUN_NAME}"
 
         """ Insert a save params function as .txt file / incorporate in RunCycleManager """
 
@@ -195,10 +188,10 @@ def train_stereo2disparity(dataset: StereoDisparityDataset):
             pass
 
         # Create Generator and Discriminator models
-        netG_A2B = Generator().to(run.device)  # GRAYSCALE stereo --> GRAYSCALE disparity
-        netG_B2A = Generator().to(run.device)  # GRAYSCALE disparity --> GRAYSCALE stereo
-        netD_A = Discriminator().to(run.device)  # GRAYSCALE stereo
-        netD_B = Discriminator().to(run.device)  # GRAYSCALE disparity
+        netG_A2B = Generator(in_channels=CHANNELS, out_channels=CHANNELS).to(run.device)
+        netG_B2A = Generator(in_channels=CHANNELS, out_channels=CHANNELS).to(run.device)
+        netD_A = Discriminator(in_channels=CHANNELS, out_channels=CHANNELS).to(run.device)
+        netD_B = Discriminator(in_channels=CHANNELS, out_channels=CHANNELS).to(run.device)
 
         # Apply weights
         netG_A2B.apply(initialize_weights)
@@ -278,28 +271,28 @@ def train_stereo2disparity(dataset: StereoDisparityDataset):
 
                 # Identity loss
                 # G_B2A(A) should equal A if real A is fed
-                identity_image_A = netG_B2A(x=real_image_A, domain_transfer="A2A")
+                identity_image_A = netG_B2A(real_image_A)
                 loss_identity_A = identity_loss(identity_image_A, real_image_A) * 5.0
 
                 # G_A2B(B) should equal B if real B is fed
-                identity_image_B = netG_A2B(x=real_image_B, domain_transfer="B2B")
+                identity_image_B = netG_A2B(real_image_B)
                 loss_identity_B = identity_loss(identity_image_B, real_image_B) * 5.0
 
                 # GAN loss: D_A(G_A(A))
-                fake_image_A = netG_B2A(x=real_image_B, domain_transfer="B2A")
-                fake_output_A = netD_A(x=fake_image_A, domain_transfer="A2A")
+                fake_image_A = netG_B2A(real_image_B)
+                fake_output_A = netD_A(fake_image_A)
                 loss_GAN_B2A = adversarial_loss(fake_output_A, real_label)
 
                 # GAN loss: D_B(G_B(B))
-                fake_image_B = netG_A2B(x=real_image_A, domain_transfer="A2B")
-                fake_output_B = netD_B(x=fake_image_B, domain_transfer="B2B")
+                fake_image_B = netG_A2B(real_image_A)
+                fake_output_B = netD_B(fake_image_B)
                 loss_GAN_A2B = adversarial_loss(fake_output_B, real_label)
 
                 # Cycle loss
-                recovered_image_A = netG_B2A(x=fake_image_B, domain_transfer="B2A")
+                recovered_image_A = netG_B2A(fake_image_B)
                 loss_cycle_ABA = cycle_loss(recovered_image_A, real_image_A) * 10.0
 
-                recovered_image_B = netG_A2B(x=fake_image_A, domain_transfer="A2B")
+                recovered_image_B = netG_A2B(fake_image_A)
                 loss_cycle_BAB = cycle_loss(recovered_image_B, real_image_B) * 10.0
 
                 # Combined loss and calculate gradients
@@ -320,12 +313,12 @@ def train_stereo2disparity(dataset: StereoDisparityDataset):
                 optimizer_D_A.zero_grad()
 
                 # Real A image loss
-                real_output_A = netD_A(x=real_image_A, domain_transfer="A2A")
+                real_output_A = netD_A(real_image_A)
                 error_D_real_A = adversarial_loss(real_output_A, real_label)
 
                 # Fake A image loss
                 fake_image_A = fake_A_buffer.push_and_pop(fake_image_A)
-                fake_output_A = netD_A(x=fake_image_A.detach(), domain_transfer="A2A")
+                fake_output_A = netD_A(fake_image_A.detach())
                 error_D_fake_A = adversarial_loss(fake_output_A, fake_label)
 
                 # Combined loss and calculate gradients
@@ -343,12 +336,12 @@ def train_stereo2disparity(dataset: StereoDisparityDataset):
                 optimizer_D_B.zero_grad()
 
                 # Real B image loss
-                real_output_B = netD_B(x=real_image_B, domain_transfer="B2B")
+                real_output_B = netD_B(real_image_B)
                 error_D_real_B = adversarial_loss(real_output_B, real_label)
 
                 # Fake B image loss
                 fake_image_B = fake_B_buffer.push_and_pop(fake_image_B)
-                fake_output_B = netD_B(x=fake_image_B.detach(), domain_transfer="B2B")
+                fake_output_B = netD_B(fake_image_B.detach())
                 error_D_fake_B = adversarial_loss(fake_output_B, fake_label)
 
                 # Combined loss and calculate gradients
@@ -368,12 +361,12 @@ def train_stereo2disparity(dataset: StereoDisparityDataset):
                 """ Convert the tensors to usable image arrays """
 
                 # Generate output
-                _fake_image_A = netG_B2A(x=real_image_B, domain_transfer="B2A")
-                _fake_image_B = netG_A2B(x=real_image_A, domain_transfer="A2B")
+                _fake_image_A = netG_B2A(real_image_B)
+                _fake_image_B = netG_A2B(real_image_A)
 
                 # Generate original image from generated (fake) output
-                _fake_original_image_A = netG_B2A(x=_fake_image_B, domain_transfer="B2A")
-                _fake_original_image_B = netG_A2B(x=_fake_image_A, domain_transfer="A2B")
+                _fake_original_image_A = netG_B2A(_fake_image_B)
+                _fake_original_image_B = netG_A2B(_fake_image_A)
 
                 # Convert to usable images
                 fake_image_A = 0.5 * (_fake_image_A.data + 1.0)
@@ -571,7 +564,7 @@ def train_stereo2disparity(dataset: StereoDisparityDataset):
 
 
 # Training function left2right
-def train_left2right(dataset: LeftRightDataset):
+def train_left2right(dataset: LeftRightDataset, dataset_name: str):
 
     """ Insert documentation """
 
@@ -593,7 +586,7 @@ def train_left2right(dataset: LeftRightDataset):
 
         # Create a unique name for this run
         RUN_NAME = f"{TODAY_TIME}___EP{run.num_epochs}_DE{run.decay_epochs}_LR{run.learning_rate}_BS{run.batch_size}"
-        RUN_PATH = f"{NAME_DATASET}/{TODAY_DATE}/{RUN_NAME}"
+        RUN_PATH = f"{dataset_name}/{TODAY_DATE}/{RUN_NAME}"
 
         """ Insert a save params function as .txt file / incorporate in RunCycleManager """
 
@@ -607,10 +600,10 @@ def train_left2right(dataset: LeftRightDataset):
             pass
 
         # Create Generator and Discriminator models
-        netG_A2B = Generator().to(run.device)  # GRAYSCALE stereo --> GRAYSCALE disparity
-        netG_B2A = Generator().to(run.device)  # GRAYSCALE disparity --> GRAYSCALE stereo
-        netD_A = Discriminator().to(run.device)  # GRAYSCALE stereo
-        netD_B = Discriminator().to(run.device)  # GRAYSCALE disparity
+        netG_A2B = Generator(in_channels=CHANNELS, out_channels=CHANNELS).to(run.device)
+        netG_B2A = Generator(in_channels=CHANNELS, out_channels=CHANNELS).to(run.device)
+        netD_A = Discriminator(in_channels=CHANNELS, out_channels=CHANNELS).to(run.device)
+        netD_B = Discriminator(in_channels=CHANNELS, out_channels=CHANNELS).to(run.device)
 
         # Apply weights
         netG_A2B.apply(initialize_weights)
@@ -683,28 +676,28 @@ def train_left2right(dataset: LeftRightDataset):
 
                 # Identity loss
                 # G_B2A(A) should equal A if real A is fed
-                identity_image_A = netG_B2A(x=real_image_A, domain_transfer="A2A")
+                identity_image_A = netG_B2A(real_image_A)
                 loss_identity_A = identity_loss(identity_image_A, real_image_A) * 5.0
 
                 # G_A2B(B) should equal B if real B is fed
-                identity_image_B = netG_A2B(x=real_image_B, domain_transfer="B2B")
+                identity_image_B = netG_A2B(real_image_B)
                 loss_identity_B = identity_loss(identity_image_B, real_image_B) * 5.0
 
                 # GAN loss: D_A(G_A(A))
-                fake_image_A = netG_B2A(x=real_image_B, domain_transfer="B2A")
-                fake_output_A = netD_A(x=fake_image_A, domain_transfer="A2A")
+                fake_image_A = netG_B2A(real_image_B)
+                fake_output_A = netD_A(fake_image_A)
                 loss_GAN_B2A = adversarial_loss(fake_output_A, real_label)
 
                 # GAN loss: D_B(G_B(B))
-                fake_image_B = netG_A2B(x=real_image_A, domain_transfer="A2B")
-                fake_output_B = netD_B(x=fake_image_B, domain_transfer="B2B")
+                fake_image_B = netG_A2B(real_image_A)
+                fake_output_B = netD_B(fake_image_B)
                 loss_GAN_A2B = adversarial_loss(fake_output_B, real_label)
 
                 # Cycle loss
-                recovered_image_A = netG_B2A(x=fake_image_B, domain_transfer="B2A")
+                recovered_image_A = netG_B2A(fake_image_B)
                 loss_cycle_ABA = cycle_loss(recovered_image_A, real_image_A) * 10.0
 
-                recovered_image_B = netG_A2B(x=fake_image_A, domain_transfer="A2B")
+                recovered_image_B = netG_A2B(fake_image_A)
                 loss_cycle_BAB = cycle_loss(recovered_image_B, real_image_B) * 10.0
 
                 # Combined loss and calculate gradients
@@ -725,12 +718,12 @@ def train_left2right(dataset: LeftRightDataset):
                 optimizer_D_A.zero_grad()
 
                 # Real A image loss
-                real_output_A = netD_A(x=real_image_A, domain_transfer="A2A")
+                real_output_A = netD_A(real_image_A)
                 error_D_real_A = adversarial_loss(real_output_A, real_label)
 
                 # Fake A image loss
                 fake_image_A = fake_A_buffer.push_and_pop(fake_image_A)
-                fake_output_A = netD_A(x=fake_image_A.detach(), domain_transfer="A2A")
+                fake_output_A = netD_A(fake_image_A.detach())
                 error_D_fake_A = adversarial_loss(fake_output_A, fake_label)
 
                 # Combined loss and calculate gradients
@@ -748,12 +741,12 @@ def train_left2right(dataset: LeftRightDataset):
                 optimizer_D_B.zero_grad()
 
                 # Real B image loss
-                real_output_B = netD_B(x=real_image_B, domain_transfer="B2B")
+                real_output_B = netD_B(real_image_B)
                 error_D_real_B = adversarial_loss(real_output_B, real_label)
 
                 # Fake B image loss
                 fake_image_B = fake_B_buffer.push_and_pop(fake_image_B)
-                fake_output_B = netD_B(x=fake_image_B.detach(), domain_transfer="B2B")
+                fake_output_B = netD_B(fake_image_B.detach())
                 error_D_fake_B = adversarial_loss(fake_output_B, fake_label)
 
                 # Combined loss and calculate gradients
@@ -773,12 +766,12 @@ def train_left2right(dataset: LeftRightDataset):
                 """ Convert the tensors to usable image arrays """
 
                 # Generate output
-                _fake_image_A = netG_B2A(x=real_image_B, domain_transfer="B2A")
-                _fake_image_B = netG_A2B(x=real_image_A, domain_transfer="A2B")
+                _fake_image_A = netG_B2A(real_image_B)
+                _fake_image_B = netG_A2B(real_image_A)
 
                 # Generate original image from generated (fake) output
-                _fake_original_image_A = netG_B2A(x=_fake_image_B, domain_transfer="B2A")
-                _fake_original_image_B = netG_A2B(x=_fake_image_A, domain_transfer="A2B")
+                _fake_original_image_A = netG_B2A(_fake_image_B)
+                _fake_original_image_B = netG_A2B(_fake_image_A)
 
                 # Convert to usable images
                 fake_image_A = 0.5 * (_fake_image_A.data + 1.0)
@@ -980,6 +973,34 @@ if __name__ == "__main__":
 
     try:
 
+        mydataloader = MyDataLoader()
+
+        dataset_l2r_train = mydataloader.add_dataset(
+            dataset_class_object=Left2RightDataset(mode="train", group="s2d", channels=3),
+            dataset_group="l2r",
+            dataset_name="Test_Set",
+            mode="train",
+            image_size=(83, 147),
+            channels=3,
+        )
+
+        # dataset_s2d_train = mydataloader.add_dataset(
+        #     dataset_class_object=Stereo2DisparityDataset(),
+        #     dataset_group="s2d",
+        #     dataset_name="Test_Set",
+        #     mode="train",
+        #     image_size=(83, 147),
+        #     channels=3,
+        # )
+
+        # print(dataset_s2d_train)
+
+        # mydataloader.init_dataset(type="s2d", name="Test_Set", channels=3, image_size=(83, 147))
+
+        # dataset_l2r = mydataloader.get_L2R.load(mode="train")
+
+        # train_left2right(dataset=dataset_l2r, dataset_name="Test_Set")
+
         """ Synthesize training data """
 
         # syn = Synthesis(mode="test")
@@ -988,22 +1009,23 @@ if __name__ == "__main__":
         """ Train a {left2right} neural network """
 
         # dataset_train_l2r: LeftRightDataset = load_dataset_left2right(
-        #     dir=DIR_L2R_DATASET, name=NAME_DATASET, mode="train", verbose=True
+        #     dir=DIR_L2R_DATASET, name=NAME_L2R_DATASET, mode="train", verbose=True
         # )
-        # train_left2right(dataset=dataset_train_l2r)
+        # train_left2right(dataset=dataset_train_l2r, dataset_name=NAME_L2R_DATASET)
 
-        """ Train a {stereo2disparity} neural network """
+        # """ Train a {stereo2disparity} neural network """
 
-        dataset_train_stereo2disparity: StereoDisparityDataset = load_dataset_stereo2disparity(
-            dir=DIR_S2D_DATASET, name=NAME_DATASET, mode="train", verbose=True, invert_colours=False
-        )
-        train_stereo2disparity(dataset=dataset_train_stereo2disparity)
+        # dataset_train_stereo2disparity: StereoDisparityDataset = load_dataset_stereo2disparity(
+        #     dir=DIR_S2D_DATASET, name=NAME_S2D_DATASET, mode="train", verbose=True
+        # )
+
+        # train_stereo2disparity(dataset=dataset_train_stereo2disparity, dataset_name=NAME_S2D_DATASET)
 
         """ Test a neural network """
 
         # dataset_test: StereoDisparityDataset = load_dataset(
         #     dir=DIR_S2D_DATASET,
-        #     name=NAME_DATASET, mode="test", verbose=Tru+e
+        #     name=NAME_S2D_DATASET, mode="test", verbose=Tru+e
         # )
 
         # __DATASET, __DATE, __MODEL_NAME = (
@@ -1014,7 +1036,7 @@ if __name__ == "__main__":
 
         # test(
         #     PARAMETERS=PARAMETERS,
-        #     NAME_DATASET=NAME_DATASET,
+        #     NAME_S2D_DATASET=NAME_S2D_DATASET,
         #     SHOW_IMG_FREQ=SHOW_IMG_FREQ,
         #     dataset=dataset_test,
         #     path_to_folder=f"{DIR_WEIGHTS}/{__DATASET}/{__DATE}/{__MODEL_NAME}",

@@ -16,18 +16,11 @@ class StereoDisparityDataset(Dataset):
     """ Insert documentation for ImageDataset class """
 
     def __init__(
-        self,
-        root,
-        mode: str = "train",
-        transforms_GRAY: transforms = None,
-        transforms_RGB: transforms = None,
-        invert_colours: bool = False,
+        self, root, mode: str = "train", transforms: transforms = None,
     ):
 
         # Get transformation and alignment
-        self.transform_GRAY = transforms_GRAY
-        self.transform_RGB = transforms_RGB
-        self.invert_colours = invert_colours
+        self.transforms = transforms
 
         # Sort stereo left/right and corresponding disparity
         self.raw_stereo_l = sorted(glob.glob(os.path.join(root, f"{mode}/A/left") + "/*.*"))
@@ -58,6 +51,9 @@ class StereoDisparityDataset(Dataset):
                 # Open image, transform to tensor
                 transform_tensor = transforms.Compose([transforms.ToTensor()])
                 image_rgb_tensor = transform_tensor(Image.open(filepath))
+
+                if i == 0:
+                    print("image_rgb_tensor.shape[0]:", image_rgb_tensor.shape[0])
 
                 # Check channels and if not 3 (RGB), convert to RGB and save
                 if image_rgb_tensor.shape[0] != 3:
@@ -104,9 +100,9 @@ class StereoDisparityDataset(Dataset):
 
     def __getitem__(self, index):
 
-        item_A_l = self.transform_GRAY(Image.open(self.stereo_l[index % len(self.stereo_l)]))
-        item_A_r = self.transform_GRAY(Image.open(self.stereo_r[index % len(self.stereo_r)]))
-        disparity = self.transform_GRAY(Image.open(self.disparity[index % len(self.disparity)]))
+        item_A_l = self.transforms(Image.open(self.stereo_l[index % len(self.stereo_l)]))
+        item_A_r = self.transforms(Image.open(self.stereo_r[index % len(self.stereo_r)]))
+        disparity = self.transforms(Image.open(self.disparity[index % len(self.disparity)]))
 
         return {"A_left": item_A_l, "A_right": item_A_r, "B": disparity}
 

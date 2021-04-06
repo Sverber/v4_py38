@@ -3,69 +3,11 @@ import torch.nn as nn
 from .ResidualBlock import ResidualBlock
 
 
-class __Generator(nn.Module):
-
-    """ Insert documentation """
-
-    def __init__(self):
-
-        super().__init__()
-
-        self.main = nn.Sequential(
-            #
-            # Input layer
-            #
-            nn.ReflectionPad2d(3),
-            nn.Conv2d(3, 64, 7),
-            nn.InstanceNorm2d(64),
-            nn.ReLU(inplace=True),
-            #
-            # Downsampling
-            #
-            nn.Conv2d(64, 128, 3, stride=2, padding=1),
-            nn.InstanceNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(128, 256, 3, stride=2, padding=1),
-            nn.InstanceNorm2d(256),
-            nn.ReLU(inplace=True),
-            #
-            # Residual blocks
-            #
-            ResidualBlock(256),
-            ResidualBlock(256),
-            ResidualBlock(256),
-            ResidualBlock(256),
-            ResidualBlock(256),
-            ResidualBlock(256),
-            ResidualBlock(256),
-            ResidualBlock(256),
-            ResidualBlock(256),
-            #
-            # Upsampling
-            #
-            nn.ConvTranspose2d(256, 128, 3, stride=2, padding=1, output_padding=1),
-            nn.InstanceNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(128, 64, 3, stride=2, padding=1, output_padding=1),
-            nn.InstanceNorm2d(64),
-            nn.ReLU(inplace=True),
-            #
-            # Output layer
-            #
-            nn.ReflectionPad2d(3),
-            nn.Conv2d(64, 3, 7),
-            nn.Tanh(),
-        )
-
-    def forward(self, x):
-        return self.main(x)
-
-
 class Generator(nn.Module):
 
     """ Insert documentation """
 
-    def __init__(self, in_channels: int = 1, out_channels: int = 1):
+    def __init__(self, in_channels: int, out_channels: int):
 
         super().__init__()
 
@@ -122,25 +64,13 @@ class Generator(nn.Module):
             nn.Tanh(),
         )
 
-    def forward(self, x, domain_transfer):
+    def forward(self, x):
 
         """ Insert documentation """
-        
+
         return self.main(x)
 
-        # given_channels = x[0].size()[0]
-        # inversed_input = self.in_channels != given_channels
 
-        # # print(f"[G] - {domain_transfer}, given_channels={given_channels}, self.in={self.in_channels}, self.out={self.out_channels}")
-
-        # if domain_transfer == ("A2B" or "B2A"):
-        #     return self.main(x)
-        # elif domain_transfer == "A2A":
-        #     return self.main_A2A(x)
-        # elif domain_transfer == "B2B":
-        #     return self.main_B2B(x)
-        # else:
-        #     return self.main(x)
 
 # class OneToMultiGenerator(nn.Module):
 
