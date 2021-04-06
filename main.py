@@ -39,7 +39,7 @@ from utils.classes.StereoDisparityDataset import StereoDisparityDataset
 from utils.models.cycle.Discriminator import Discriminator
 from utils.models.cycle.Generators import Generator
 
-from dataloaders import MyDataLoader, MyDataWrapper, Left2RightDataset, Stereo2DisparityDataset
+from dataloaders import MyDataLoader
 
 from test import test
 
@@ -975,23 +975,16 @@ if __name__ == "__main__":
 
         mydataloader = MyDataLoader()
 
-        dataset_l2r_train = mydataloader.add_dataset(
-            dataset_class_object=Left2RightDataset(mode="train", group="s2d", channels=3),
-            dataset_group="l2r",
-            dataset_name="Test_Set",
-            mode="train",
-            image_size=(83, 147),
-            channels=3,
+        dataset_l2r_train = mydataloader.get_dataset(
+            dataset_group="l2r", dataset_name="Test_Set", dataset_mode="train", image_size=(83, 147), channels=3,
         )
 
-        # dataset_s2d_train = mydataloader.add_dataset(
-        #     dataset_class_object=Stereo2DisparityDataset(),
-        #     dataset_group="s2d",
-        #     dataset_name="Test_Set",
-        #     mode="train",
-        #     image_size=(83, 147),
-        #     channels=3,
-        # )
+        dataset_s2d_train = mydataloader.get_dataset(
+            dataset_group="s2d", dataset_name="Test_Set", dataset_mode="train", image_size=(83, 147), channels=3,
+        )
+
+        print(dataset_l2r_train)
+        print(dataset_s2d_train)
 
         # print(dataset_s2d_train)
 
