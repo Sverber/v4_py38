@@ -47,14 +47,14 @@ class RunCycleManager:
 
         self.run = Run()
         self.epoch = Epoch()
-        self.netG_A2B = None
-        self.netG_B2A = None
-        self.netD_A = None
-        self.netD_B = None
+        self.net_G_A2B = None
+        self.net_G_B2A = None
+        self.net_D_A = None
+        self.net_D_B = None
         self.loader = None
         self.tb = None
 
-    def begin_run(self, run, loader, netG_A2B, netG_B2A, netD_A, netD_B) -> None:
+    def begin_run(self, run, loader) -> None:
 
         """ [ Insert documentation ] """
 
@@ -63,11 +63,6 @@ class RunCycleManager:
         self.run.start_time = time.time()
         self.run.params = run
         self.run.count += 1
-
-        self.netG_A2B = netG_A2B
-        self.netG_B2A = netG_B2A
-        self.netD_A = netD_A
-        self.netD_B = netD_B
 
         self.loader = loader
 
@@ -113,6 +108,7 @@ class RunCycleManager:
         return None
       
         print("- TO-DO: Complete the manager.end_epoch() function.")
+        print("- [TO-DO] YOLOv5 or newer to implement object detectino before")
 
         self.epoch.duration = time.time() - self.epoch.start_time
         self.run.duration = time.time() - self.run.start_time
