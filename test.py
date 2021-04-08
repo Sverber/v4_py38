@@ -141,7 +141,6 @@ def test(
 
             """ (1) Calculate losses for the generated (fake) output """
 
-
             # Calculate the mean square error (MSE) loss
             mse_loss_A = mse_loss(fake_image_A, real_image_B)
             mse_loss_B = mse_loss(fake_image_B, real_image_A)
@@ -218,3 +217,18 @@ def test(
     # </end> def test():
     pass
 
+
+# Execute main code
+if __name__ == "__main__":
+
+    try:
+
+        """ [TO-DO] Rewrite and connect as callback to train.py """
+
+        pass
+
+    except KeyboardInterrupt:
+        try:
+            sys.exit(0)
+        except SystemExit:
+            os._exit(0)
