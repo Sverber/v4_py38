@@ -131,7 +131,8 @@ class RunCycleManager:
         RUN_PATH = self.get_run_path(run, dataset.name)
 
         # Make required directories for storing the training output
-        self.makedirs(os.path.join(self.DIR_OUTPUTS, RUN_PATH))
+        self.makedirs(path=os.path.join(self.DIR_WEIGHTS, RUN_PATH), dir="weights")
+        self.makedirs(path=os.path.join(self.DIR_OUTPUTS, RUN_PATH), dir="outputs")
 
         # Create Generator and Discriminator models
         self.net_G_A2B = Generator(in_channels=self.channels, out_channels=self.channels).to(run.device)
@@ -447,13 +448,15 @@ class RunCycleManager:
 
             """ </for> for i, data in progress_bar: """
 
-            self.makedirs(os.path.join(self.DIR_WEIGHTS, RUN_PATH))
-
             # Check points, save weights after each epoch
-            torch.save(self.net_G_A2B.state_dict(), f"{self.DIR_WEIGHTS}/{RUN_PATH}/net_G_A2B_epoch_{epoch}.pth")
-            torch.save(self.net_G_A2B.state_dict(), f"{self.DIR_WEIGHTS}/{RUN_PATH}/net_G_A2B_epoch_{epoch}.pth")
-            torch.save(self.net_D_A.state_dict(), f"{self.DIR_WEIGHTS}/{RUN_PATH}/net_D_A_epoch_{epoch}.pth")
-            torch.save(self.net_D_B.state_dict(), f"{self.DIR_WEIGHTS}/{RUN_PATH}/net_D_B_epoch_{epoch}.pth")
+            torch.save(
+                self.net_G_A2B.state_dict(), f"{self.DIR_WEIGHTS}/{RUN_PATH}/net_G_A2B/net_G_A2B_epoch_{epoch}.pth"
+            )
+            torch.save(
+                self.net_G_A2B.state_dict(), f"{self.DIR_WEIGHTS}/{RUN_PATH}/net_G_B2A/net_G_A2B_epoch_{epoch}.pth"
+            )
+            torch.save(self.net_D_A.state_dict(), f"{self.DIR_WEIGHTS}/{RUN_PATH}/net_D_A/net_D_A_epoch_{epoch}.pth")
+            torch.save(self.net_D_B.state_dict(), f"{self.DIR_WEIGHTS}/{RUN_PATH}/net_D_B/net_D_B_epoch_{epoch}.pth")
 
             # Update learning rates after each epoch
             lr_scheduler_G_A2B.step()
@@ -634,15 +637,25 @@ class RunCycleManager:
         # print(f"Saved results to: {fileName}.json && {fileName}.csv")
 
     @staticmethod
-    def makedirs(path):
+    def makedirs(path: str, dir: str):
 
-        try:
-            os.makedirs(os.path.join(path, "A"))
-            os.makedirs(os.path.join(path, "B"))
-            os.makedirs(os.path.join(path, "A", "epochs"))
-            os.makedirs(os.path.join(path, "B", "epochs"))
-        except OSError:
-            pass
+        if dir == "outputs":
+            try:
+                os.makedirs(os.path.join(path, "A"))
+                os.makedirs(os.path.join(path, "B"))
+                os.makedirs(os.path.join(path, "A", "epochs"))
+                os.makedirs(os.path.join(path, "B", "epochs"))
+            except OSError:
+                pass
+
+        elif dir == "weights":
+            try:
+                os.makedirs(os.path.join(path, "net_G_A2B"))
+                os.makedirs(os.path.join(path, "net_G_B2A"))
+                os.makedirs(os.path.join(path, "net_D_A"))
+                os.makedirs(os.path.join(path, "net_D_B"))
+            except OSError:
+                pass
 
     @staticmethod
     def get_run_path(run, dataset_name) -> str:
@@ -651,27 +664,26 @@ class RunCycleManager:
         TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
         TODAY_TIME = datetime.today().strftime("%H.%M.%S")
 
+        digits = len(str(run.num_epochs))
+
         # Create a unique name for this run
-        RUN_NAME = f"{TODAY_TIME}___EP{run.num_epochs}_DE{run.decay_epochs}_LR{run.learning_rate}_BS{run.batch_size}"
+        RUN_NAME = f"{TODAY_TIME}___EP{str(run.num_epochs).zfill(digits)}_DE{str(run.decay_epochs).zfill(digits)}_LR{run.learning_rate}_BS{run.batch_size}"
 
         RUN_PATH = f"{dataset_name}/{TODAY_DATE}/{RUN_NAME}"
 
         return RUN_PATH
 
 
-# Constants: device
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 # Configure network parameters
 PARAMETERS: OrderedDict = OrderedDict(
-    device=[DEVICE],
+    device=[torch.device("cuda" if torch.cuda.is_available() else "cpu")],
     shuffle=[True],
     num_workers=[4],
     manualSeed=[999],
     learning_rate=[0.0002, 0.0001, 0.00005],
     batch_size=[1],
-    num_epochs=[10],
-    decay_epochs=[5],
+    num_epochs=[2],
+    decay_epochs=[1],
 )
 
 
@@ -682,17 +694,19 @@ if __name__ == "__main__":
 
         mydataloader = MyDataLoader()
 
-        # dataset_l2r_train = mydataloader.get_dataset("l2r", "Test_Set_RGB_Original", "train", (83, 147), 3, False)
-        dataset_s2d_train = mydataloader.get_dataset("s2d", "Test_Set_RGB_Original", "train", (83, 147), 3, False)
+        # dataset_l2r_train = mydataloader.get_dataset("l2r", "Test_Set_RGB_Original", "train", (68, 120), 3, False)
+        dataset_s2d_train = mydataloader.get_dataset("s2d", "Test_Set_RGB_Original", "train", (68, 120), 3, False)
 
-        # dataset_l2r_test = mydataloader.get_dataset("l2r", "Test_Set_RGB_Original", "test", (83, 147), 3, False)
-        # dataset_s2d_test = mydataloader.get_dataset("s2d", "Test_Set_RGB_Original", "test", (83, 147), 3, False)
+        # dataset_l2r_test = mydataloader.get_dataset("l2r", "Test_Set_RGB_Original", "test", (68, 120), 3, False)
+        # dataset_s2d_test = mydataloader.get_dataset("s2d", "Test_Set_RGB_Original", "test", (68, 120), 3, False)
 
         # l2r_manager = RunCycleManager(dataset_l2r_train, 3, PARAMETERS)
         s2d_manager = RunCycleManager(dataset_s2d_train, 3, PARAMETERS)
 
         # l2r_manager.start_cycle()
         s2d_manager.start_cycle()
+
+        # remove randomcrop because they seem (vertically) shifted right/left
 
         pass
 

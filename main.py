@@ -87,40 +87,6 @@ SAVE_EPOCH_FREQ = 1
             generated left-right image and the depth map as training data for the GAN.
 """
 
-# Configure network parameters
-PARAMETERS: OrderedDict = OrderedDict(
-    device=[DEVICE],
-    shuffle=[True],
-    num_workers=[4],
-    manualSeed=[MANUAL_SEED],
-    learning_rate=[0.0002],
-    batch_size=[1],
-    num_epochs=[30],
-    decay_epochs=[20],
-)
-
-# Transformations on the datasets containing RGB stereo images
-TRANSFORMATIONS_RGB: transforms = transforms.Compose(
-    [
-        transforms.Resize(size=IMAGE_SIZE, interpolation=Image.BICUBIC),
-        transforms.RandomCrop(size=RANDM_CROP),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
-    ]
-)
-
-# Transformations on the datasets containing grayscaled disparity maps
-TRANSFORMATIONS_GRAY: transforms = transforms.Compose(
-    [
-        transforms.Resize(size=IMAGE_SIZE, interpolation=Image.BICUBIC),
-        transforms.RandomCrop(size=RANDM_CROP),
-        transforms.Grayscale(num_output_channels=1),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.5), std=(0.5)),
-    ]
-)
-
-
 # Execute main code
 if __name__ == "__main__":
 

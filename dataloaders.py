@@ -268,7 +268,7 @@ class MyDataLoader:
                 group=dataset_group,
                 mode=dataset_mode,
                 name=dataset_name,
-                transforms=self.__get_transforms(channels, image_size),
+                tFsforms=self.__get_transforms(channels, image_size),
                 channels=channels,
                 check_channels=check_channels,
             )
@@ -285,7 +285,7 @@ class MyDataLoader:
             raise Exception(f"Can not get dataset for given: {summary}")
 
     @staticmethod
-    def __get_transforms(channels, image_size, crop_ratio: float = 0.82) -> transforms:
+    def __get_transforms(channels, image_size, crop_ratio: float = 1.0) -> transforms:
 
         RANDOM_CROP = (int(image_size[0] * crop_ratio), int(image_size[1] * crop_ratio))
 
