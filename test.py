@@ -46,19 +46,24 @@ DIR_WEIGHTS = f"./weights"
 
 # Testing function
 def test(
-    PARAMETERS: OrderedDict,
-    NAME_S2D_DATASET: str,
-    SHOW_IMG_FREQ: int,
     dataset: StereoDisparityDataset,
-    path_to_folder: str,
+    parameters: OrderedDict,
+    #
+    dataset_group: str,
+    dataset_name: str,
+    model_name: str,
+    model_date: str,
+    #
     model_netG_A2B: str,
     model_netG_B2A: str,
 ) -> None:
 
     """ Insert documentation """
 
+    path_to_folder = f"weights/{dataset_group}/{dataset_name}/{model_date}/{model_name}"
+
     # Iterate over every run, based on the configurated params
-    for run in RunCycleBuilder.get_runs(PARAMETERS):
+    for run in RunCycleBuilder.get_runs(parameters):
 
         # Store today's date in string format
         TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
@@ -66,12 +71,12 @@ def test(
 
         # Create a unique name for this run
         RUN_NAME = f"{TODAY_TIME}___EP{run.num_epochs}_DE{run.decay_epochs}_LR{run.learning_rate}_BS{run.batch_size}"
-        RUN_PATH = f"{NAME_S2D_DATASET}/{TODAY_DATE}/{RUN_NAME}"
+        RUN_PATH = f"{dataset_name}/{TODAY_DATE}/{RUN_NAME}"
 
         # Make required directories for testing
         try:
-            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "A"))
-            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "B"))
+            os.makedirs(os.path.join(DIR_RESULTS, dataset_name, RUN_PATH, "A"))
+            os.makedirs(os.path.join(DIR_RESULTS, dataset_name, RUN_PATH, "B"))
         except OSError:
             pass
 
@@ -88,8 +93,8 @@ def test(
         netG_B2A = Generator(in_channels=3, out_channels=3).to(run.device)
 
         # Load state dicts
-        netG_A2B.load_state_dict(torch.load(os.path.join(str(path_to_folder), model_netG_A2B)))
-        netG_B2A.load_state_dict(torch.load(os.path.join(str(path_to_folder), model_netG_B2A)))
+        netG_A2B.load_state_dict(torch.load(os.path.join(str(path_to_folder), "net_G_A2B", model_netG_A2B)))
+        netG_B2A.load_state_dict(torch.load(os.path.join(str(path_to_folder), "net_G_B2A", model_netG_B2A)))
 
         # Set model mode
         netG_A2B.eval()
@@ -179,23 +184,21 @@ def test(
                 f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}___fake_original_MSE{mse_loss_f_or_B:.3f}.png",
             )
 
-            # Save images
-            if (i + 1) % SHOW_IMG_FREQ == 0:
-                # Save real input images
-                vutils.save_image(real_image_A.detach(), filepath_real_A, normalize=True)
-                vutils.save_image(real_image_B.detach(), filepath_real_B, normalize=True)
+            # Save real input images
+            vutils.save_image(real_image_A.detach(), filepath_real_A, normalize=True)
+            vutils.save_image(real_image_B.detach(), filepath_real_B, normalize=True)
 
-                # Save generated (fake) output images
-                vutils.save_image(fake_image_A.detach(), filepath_fake_A, normalize=True)
-                vutils.save_image(fake_image_B.detach(), filepath_fake_B, normalize=True)
+            # Save generated (fake) output images
+            vutils.save_image(fake_image_A.detach(), filepath_fake_A, normalize=True)
+            vutils.save_image(fake_image_B.detach(), filepath_fake_B, normalize=True)
 
-                # Save generated (fake) original images
-                vutils.save_image(fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
-                vutils.save_image(fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
+            # Save generated (fake) original images
+            vutils.save_image(fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
+            vutils.save_image(fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
 
-                # Save generated (fake) original images
-                vutils.save_image(fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
-                vutils.save_image(fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
+            # Save generated (fake) original images
+            vutils.save_image(fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
+            vutils.save_image(fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
 
             # Print a progress bar in terminal
             progress_bar.set_description(f"Process images {i + 1} of {len(loader)}")
@@ -216,19 +219,3 @@ def test(
 
     # </end> def test():
     pass
-
-
-# Execute main code
-if __name__ == "__main__":
-
-    try:
-
-        """ [TO-DO] Rewrite and connect as callback to train.py """
-
-        pass
-
-    except KeyboardInterrupt:
-        try:
-            sys.exit(0)
-        except SystemExit:
-            os._exit(0)

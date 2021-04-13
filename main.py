@@ -3,82 +3,15 @@ from __future__ import absolute_import, division, print_function
 
 import os
 import sys
-import time
-import random
-import numpy as np
-
 import torch
-import torch.nn as nn
-import torch.backends.cudnn as cudnn
 import torch.utils.data
-import torch.utils.data.distributed
-from torchvision.transforms.transforms import Grayscale
-import torchvision.utils as vutils
-import torchvision.transforms as transforms
 
-from PIL import Image
-from tqdm import tqdm
-from datetime import datetime
 from collections import OrderedDict
-from skimage.metrics import structural_similarity as ssim
-
-from torch.utils.data.dataloader import DataLoader
-
-from synthesis.Synthesis import Synthesis
-
-from utils.functions.initialize_weights import initialize_weights
-
-from utils.classes.DecayLR import DecayLR
-from utils.classes.ReplayBuffer import ReplayBuffer
-from utils.classes.RunCycleBuilder import RunCycleBuilder
-from utils.classes.RunCycleManager import RunCycleManager
-from utils.classes.LeftRightDataset import LeftRightDataset
-from utils.classes.StereoDisparityDataset import StereoDisparityDataset
-
-from utils.models.cycle.Discriminator import Discriminator
-from utils.models.cycle.Generators import Generator
 
 from dataloaders import MyDataLoader
 
+from train import RunCycleManager
 from test import test
-from train import TrainCycleManager
-
-# Clear terminal
-os.system("cls")
-
-# Constants: required l2r directories
-DIR_L2R_DATASET = f"./dataset/l2r"
-DIR_L2R_OUTPUTS = f"./outputs/l2r"
-DIR_L2R_RESULTS = f"./results/l2r"
-DIR_L2R_WEIGHTS = f"./weights/l2r"
-
-# Constants: required s2d directories
-DIR_S2D_DATASET = f"./dataset/s2d"
-DIR_S2D_OUTPUTS = f"./outputs/s2d"
-DIR_S2D_RESULTS = f"./results/s2d"
-DIR_S2D_WEIGHTS = f"./weights/s2d"
-
-# Constants: dataset name
-# NAME_S2D_DATASET = f"kitti_synthesized_000_999"
-# NAME_S2D_DATASET = f"DrivingStereo_demo_images"
-# NAME_S2D_DATASET = f"QuickDevelop" # 1242 x 2208 resize by a factor /15 to (83, 147) | (y, x)
-# NAME_S2D_DATASET = f"Test_GrayscaleRGB"  # 1242 x 2208 resize by a factor /15 to (83, 147) | (y, x)
-NAME_S2D_DATASET = f"Test_Set_RGB_Original"  # 1242 x 2208 resize by a factor /15 to (83, 147) | (y, x)
-NAME_L2R_DATASET = f"Test_Set"
-
-# Constants: system and reproducibility
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-MANUAL_SEED = 999
-CHANNELS = 3
-
-# Constants: parameters, IMAGE_SIZE: [height, width]
-# IMAGE_SIZE = (122, 35)    # kitti_synthesized_000_999
-# IMAGE_SIZE = (176, 79)    # DrivingStereo_demo_images
-IMAGE_SIZE = (83, 147)  # USASOL images factor /15
-RATIO_CROP = 0.82
-RANDM_CROP = (int(IMAGE_SIZE[0] * RATIO_CROP), int(IMAGE_SIZE[1] * RATIO_CROP))
-SHOW_IMG_FREQ = 5
-SAVE_EPOCH_FREQ = 1
 
 """ [TO-DO] Make the proposed synthesis network in the train using image translation and monodepth2 """
 """ [TO-DO] Make the new idea for the synthesis network using a cycle consistent GAN for stereo synthesis """
@@ -87,44 +20,59 @@ SAVE_EPOCH_FREQ = 1
             generated left-right image and the depth map as training data for the GAN.
 """
 
-# Configure network parameters
 PARAMETERS: OrderedDict = OrderedDict(
-    device=[DEVICE],
-    shuffle=[True],
+    device=[torch.device("cuda" if torch.cuda.is_available() else "cpu")],
+    shuffle=[False],
     num_workers=[4],
-    manualSeed=[MANUAL_SEED],
+    manualSeed=[999],
     learning_rate=[0.0002],
     batch_size=[1],
-    num_epochs=[30],
-    decay_epochs=[20],
+    num_epochs=[20],
+    decay_epochs=[10],
 )
 
-# Transformations on the datasets containing RGB stereo images
-TRANSFORMATIONS_RGB: transforms = transforms.Compose(
-    [
-        transforms.Resize(size=IMAGE_SIZE, interpolation=Image.BICUBIC),
-        transforms.RandomCrop(size=RANDM_CROP),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
-    ]
+PARAMETERS_TEST: OrderedDict = OrderedDict(
+    device=[torch.device("cuda" if torch.cuda.is_available() else "cpu")],
+    shuffle=[False],
+    num_workers=[4],
+    manualSeed=[999],
+    learning_rate=[0.0002],
+    batch_size=[1],
+    num_epochs=[20],
+    decay_epochs=[10],
 )
-
-# Transformations on the datasets containing grayscaled disparity maps
-TRANSFORMATIONS_GRAY: transforms = transforms.Compose(
-    [
-        transforms.Resize(size=IMAGE_SIZE, interpolation=Image.BICUBIC),
-        transforms.RandomCrop(size=RANDM_CROP),
-        transforms.Grayscale(num_output_channels=1),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.5), std=(0.5)),
-    ]
-)
-
 
 # Execute main code
 if __name__ == "__main__":
 
     try:
+
+        mydataloader = MyDataLoader()
+
+        """ Train a [L2R] model on the GRAYSCALE dataset """
+
+        # l2r_dataset_train_GRAYSCALE = mydataloader.get_dataset("l2r", "Test_Set_GRAYSCALE", "train", (68, 120), 1, True)
+        # l2r_manager_GRAYSCALE = RunCycleManager(l2r_dataset_train_GRAYSCALE, 1, PARAMETERS)
+        # l2r_manager_GRAYSCALE.start_cycle()
+
+        """ Train a [L2R] model on the RGB dataset """
+
+        # l2r_dataset_train_RGB = mydataloader.get_dataset("l2r", "Test_Set_GRAYSCALE", "train", (68, 120), 1, True)
+        # l2r_manager_RGB = RunCycleManager(l2r_dataset_train_RGB, 1, PARAMETERS)
+        # l2r_manager_RGB.start_cycle()
+
+        """ Train a [S2D] model on the GRAYSCALE dataset """
+
+        # s2d_dataset_train_GRAYSCALE = mydataloader.get_dataset("s2d", "Test_Set_GRAYSCALE", "train", (68, 120), 1, False)
+        # s2d_manager_GRAYSCALE = RunCycleManager(s2d_dataset_train_GRAYSCALE, 1, PARAMETERS)
+        # s2d_manager_GRAYSCALE.start_cycle()
+
+       
+        """ Train a [S2D] model on the RGB dataset """
+
+        # s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB", "train", (68, 120), 3, False)
+        # s2d_manager_RGB = RunCycleManager(s2d_dataset_train_RGB, 3, PARAMETERS)
+        # s2d_manager_RGB.start_cycle()
 
         # mydataloader = MyDataLoader()
 
@@ -163,26 +111,20 @@ if __name__ == "__main__":
 
         """ Test a neural network """
 
-        # dataset_test: StereoDisparityDataset = load_dataset(
-        #     dir=DIR_S2D_DATASET,
-        #     name=NAME_S2D_DATASET, mode="test", verbose=Tru+e
-        # )
+        s2d_dataset_test_RGB_DISPARITY = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "test", (68, 120), 3, False)
 
-        # __DATASET, __DATE, __MODEL_NAME = (
-        #     f"Test_Set",
-        #     f"2021-03-26",
-        #     f"16.38.24___EP100_DE50_LR0.0002_BS1",
-        # )
-
-        # test(
-        #     PARAMETERS=PARAMETERS,
-        #     NAME_S2D_DATASET=NAME_S2D_DATASET,
-        #     SHOW_IMG_FREQ=SHOW_IMG_FREQ,
-        #     dataset=dataset_test,
-        #     path_to_folder=f"{DIR_WEIGHTS}/{__DATASET}/{__DATE}/{__MODEL_NAME}",
-        #     model_netG_A2B=f"netG_A2B.pth",
-        #     model_netG_B2A=f"netG_B2A.pth",
-        # )
+        test(  
+            parameters=PARAMETERS,
+            dataset=s2d_dataset_test_RGB_DISPARITY,
+            #
+            dataset_group = "s2d", 
+            dataset_name = "Test_Set_RGB_DISPARITY",
+            model_date = "2021-04-12",
+            model_name = "23.01.17___EP80_DE50_LR0.0002_CH3",
+            #
+            model_netG_A2B=f"net_G_A2B_epoch_17.pth",
+            model_netG_B2A=f"net_G_B2A_epoch_17.pth",
+        )      
 
         pass
 

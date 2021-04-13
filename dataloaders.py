@@ -268,7 +268,7 @@ class MyDataLoader:
                 group=dataset_group,
                 mode=dataset_mode,
                 name=dataset_name,
-                transforms=self.__get_transforms(channels, image_size),
+                tFsforms=self.__get_transforms(channels, image_size),
                 channels=channels,
                 check_channels=check_channels,
             )
@@ -285,14 +285,14 @@ class MyDataLoader:
             raise Exception(f"Can not get dataset for given: {summary}")
 
     @staticmethod
-    def __get_transforms(channels, image_size, crop_ratio: float = 0.82) -> transforms:
+    def __get_transforms(channels, image_size, crop_ratio: float = 1.0) -> transforms:
 
         RANDOM_CROP = (int(image_size[0] * crop_ratio), int(image_size[1] * crop_ratio))
 
         transforms_1d: transforms = transforms.Compose(
             [
                 transforms.Resize(size=image_size, interpolation=Image.BICUBIC),
-                transforms.RandomCrop(size=RANDOM_CROP),
+                # transforms.RandomCrop(size=RANDOM_CROP),
                 transforms.Grayscale(num_output_channels=1),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=(0.5), std=(0.5)),
@@ -302,7 +302,7 @@ class MyDataLoader:
         transforms_3d: transforms = transforms.Compose(
             [
                 transforms.Resize(size=image_size, interpolation=Image.BICUBIC),
-                transforms.RandomCrop(size=RANDOM_CROP),
+                # transforms.RandomCrop(size=RANDOM_CROP),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
             ]
