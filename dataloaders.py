@@ -292,7 +292,7 @@ class MyDataLoader:
         transforms_1d: transforms = transforms.Compose(
             [
                 transforms.Resize(size=image_size, interpolation=Image.BICUBIC),
-                transforms.RandomCrop(size=RANDOM_CROP),
+                # transforms.RandomCrop(size=RANDOM_CROP),
                 transforms.Grayscale(num_output_channels=1),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=(0.5), std=(0.5)),
@@ -302,7 +302,7 @@ class MyDataLoader:
         transforms_3d: transforms = transforms.Compose(
             [
                 transforms.Resize(size=image_size, interpolation=Image.BICUBIC),
-                transforms.RandomCrop(size=RANDOM_CROP),
+                # transforms.RandomCrop(size=RANDOM_CROP),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
             ]
