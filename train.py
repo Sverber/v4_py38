@@ -835,7 +835,7 @@ if __name__ == "__main__":
 
         """ Train a [S2D] model on the RGB dataset """
 
-        s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB", "train", (68, 120), 3, False)
+        s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (68, 120), 3, False)
         s2d_manager_RGB = RunCycleManager(s2d_dataset_train_RGB, 3, PARAMETERS)
         s2d_manager_RGB.start_cycle()
 
