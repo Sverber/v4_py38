@@ -143,27 +143,24 @@ class RunCycleManager:
         # Create csv for the logs file of this run
         with open(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/logs.csv", "w", newline="") as file:
             writer = csv.writer(file)
-            writer.writerow([
-                "Epoch",
-                "Loss D(A)", 
-                "Loss D(B)", 
-                "Loss identity A",
-                "Loss identity B",
-                "Loss GAN(A2B)", 
-                "Loss GAN(B2A)", 
-                "Loss Cycle ABA",
-                "Loss Cycle BAB",
-                "G(A2B)_MSE(avg)", 
-                "G(B2A)_MSE(avg)", 
-                "G(A2B2A)_MSE(avg)",
-                "G(B2A2B)_MSE(avg)",
-            ])
+            writer.writerow(
+                [
+                    "Epoch",
+                    "Loss D(A)",
+                    "Loss D(B)",
+                    "Loss identity A",
+                    "Loss identity B",
+                    "Loss GAN(A2B)",
+                    "Loss GAN(B2A)",
+                    "Loss Cycle ABA",
+                    "Loss Cycle BAB",
+                    "G(A2B)_MSE(avg)",
+                    "G(B2A)_MSE(avg)",
+                    "G(A2B2A)_MSE(avg)",
+                    "G(B2A2B)_MSE(avg)",
+                ]
+            )
 
-
-        # f"L_G_ID: {(loss_identity_A + loss_identity_B).item():.2f} "
-        # f"L_G_GAN: {(loss_GAN_A2B + loss_GAN_B2A).item():.2f} "
-        # f"L_G_CYCLE: {(loss_cycle_ABA + loss_cycle_BAB).item():.2f} "
-        
         # Create Generator and Discriminator models
         self.net_G_A2B = Generator(in_channels=self.channels, out_channels=self.channels).to(run.device)
         self.net_G_B2A = Generator(in_channels=self.channels, out_channels=self.channels).to(run.device)
@@ -172,7 +169,7 @@ class RunCycleManager:
 
         # Apply weights
         self.net_G_A2B.apply(initialize_weights)
-        self.net_G_A2B.apply(initialize_weights)
+        self.net_G_B2A.apply(initialize_weights)
         self.net_D_A.apply(initialize_weights)
         self.net_D_B.apply(initialize_weights)
 
@@ -183,7 +180,7 @@ class RunCycleManager:
 
         # Optimizers
         self.optimizer_G_A2B = torch.optim.Adam(self.net_G_A2B.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
-        self.optimizer_G_B2A = torch.optim.Adam(self.net_G_A2B.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
+        self.optimizer_G_B2A = torch.optim.Adam(self.net_G_B2A.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
         self.optimizer_D_A = torch.optim.Adam(self.net_D_A.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
         self.optimizer_D_B = torch.optim.Adam(self.net_D_B.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
 
@@ -214,6 +211,10 @@ class RunCycleManager:
 
             # Create progress bar
             progress_bar = tqdm(enumerate(loader), total=len(loader))
+
+            # Initiate the cumulative and average error for the discriminator
+            self.cum_error_D_A, self.cum_error_D_B = 0, 0
+            self.avg_error_D_A, self.avg_error_D_B = 0, 0
 
             # Iterate over the data loader
             for i, data in progress_bar:
@@ -281,7 +282,7 @@ class RunCycleManager:
                     self.loss_cycle_BAB = self.cycle_loss(self.recovered_image_B, self.real_image_B) * 10.0
 
                     # Combined loss and calculate gradients
-                    error_G = (
+                    self.error_G = (
                         self.loss_identity_A
                         + self.loss_identity_B
                         + self.loss_GAN_A2B
@@ -291,7 +292,7 @@ class RunCycleManager:
                     )
 
                     # Calculate gradients for G_A and G_B
-                    error_G.backward()
+                    self.error_G.backward()
 
                     # Update the Generator networks
                     self.optimizer_G_A2B.step()
@@ -307,16 +308,20 @@ class RunCycleManager:
                     self.optimizer_D_A.zero_grad()
 
                     # Real A image loss
-                    real_output_A = self.net_D_A(self.real_image_A)
-                    error_D_real_A = self.adversarial_loss(real_output_A, self.real_label)
+                    self.real_output_A = self.net_D_A(self.real_image_A)
+                    self.error_D_real_A = self.adversarial_loss(self.real_output_A, self.real_label)
 
                     # Fake A image loss
                     self.fake_image_A = self.fake_A_buffer.push_and_pop(self.fake_image_A)
-                    fake_output_A = self.net_D_A(self.fake_image_A.detach())
-                    error_D_fake_A = self.adversarial_loss(fake_output_A, self.fake_label)
+                    self.fake_output_A = self.net_D_A(self.fake_image_A.detach())
+                    self.error_D_fake_A = self.adversarial_loss(self.fake_output_A, self.fake_label)
 
                     # Combined loss and calculate gradients
-                    self.error_D_A = (error_D_real_A + error_D_fake_A) / 2
+                    self.error_D_A = (self.error_D_real_A + self.error_D_fake_A) / 2
+
+                    # Cumulative and average error of D_A
+                    self.cum_error_D_A += self.error_D_A
+                    self.avg_error_D_A = self.cum_error_D_A / (i + 1)
 
                     # Calculate gradients for D_A
                     self.error_D_A.backward()
@@ -328,16 +333,20 @@ class RunCycleManager:
                     self.optimizer_D_B.zero_grad()
 
                     # Real B image loss
-                    real_output_B = self.net_D_B(self.real_image_B)
-                    error_D_real_B = self.adversarial_loss(real_output_B, self.real_label)
+                    self.real_output_B = self.net_D_B(self.real_image_B)
+                    self.error_D_real_B = self.adversarial_loss(self.real_output_B, self.real_label)
 
                     # Fake B image loss
                     self.fake_image_B = self.fake_B_buffer.push_and_pop(self.fake_image_B)
-                    fake_output_B = self.net_D_B(self.fake_image_B.detach())
-                    error_D_fake_B = self.adversarial_loss(fake_output_B, self.fake_label)
+                    self.fake_output_B = self.net_D_B(self.fake_image_B.detach())
+                    self.error_D_fake_B = self.adversarial_loss(self.fake_output_B, self.fake_label)
 
                     # Combined loss and calculate gradients
-                    self.error_D_B = (error_D_real_B + error_D_fake_B) / 2
+                    self.error_D_B = (self.error_D_real_B + self.error_D_fake_B) / 2
+
+                    # Cumulative and average error of D_A
+                    self.cum_error_D_B += self.error_D_B
+                    self.avg_error_D_B = self.cum_error_D_B / (i + 1)
 
                     # Calculate gradients for D_B
                     self.error_D_B.backward()
@@ -486,7 +495,7 @@ class RunCycleManager:
                     pass
 
                 """ Call the functions to train the GAN """
-                
+
                 # Read data
                 __read_data()
 
@@ -562,29 +571,31 @@ class RunCycleManager:
                 # Save the network weights at the end of the epoch
 
             def __save_end_epoch_logs() -> None:
-                
-                with open(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/logs.csv", "w", newline="") as file:
+
+                with open(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/logs.csv", "a+", newline="") as file:
                     writer = csv.writer(file)
-                    writer.writerow([   
-                        epoch, 
-                        f"{self.error_D_A.item():.4f}",
-                        f"{self.error_D_B.item():.4f}",
-                        f"{self.loss_identity_A.item():.4f}",
-                        f"{self.loss_identity_B.item():.4f}",
-                        f"{self.loss_GAN_A2B.item():.4f}",
-                        f"{self.loss_GAN_B2A.item():.4f}",
-                        f"{self.loss_cycle_ABA.item():.4f}",
-                        f"{self.loss_cycle_BAB.item():.4f}",
-                        f"{(self.avg_mse_loss_A).item():.4f}",
-                        f"{(self.avg_mse_loss_B).item():.4f}",
-                        f"{(self.avg_mse_loss_f_or_A).item():.4f}",
-                        f"{(self.avg_mse_loss_f_or_B).item():.4f}",
-                    ])
+                    writer.writerow(
+                        [
+                            epoch,
+                            f"{self.error_D_A.item():.4f}",
+                            f"{self.error_D_B.item():.4f}",
+                            f"{self.loss_identity_A.item():.4f}",
+                            f"{self.loss_identity_B.item():.4f}",
+                            f"{self.loss_GAN_A2B.item():.4f}",
+                            f"{self.loss_GAN_B2A.item():.4f}",
+                            f"{self.loss_cycle_ABA.item():.4f}",
+                            f"{self.loss_cycle_BAB.item():.4f}",
+                            f"{(self.avg_mse_loss_A).item():.4f}",
+                            f"{(self.avg_mse_loss_B).item():.4f}",
+                            f"{(self.avg_mse_loss_f_or_A).item():.4f}",
+                            f"{(self.avg_mse_loss_f_or_B).item():.4f}",
+                        ]
+                    )
 
                 pass
-                
+
             """ Call the end-of-epoch functions """
-           
+
             # Update learning rates after each epoch
             __update_learning_rate()
 
@@ -595,8 +606,6 @@ class RunCycleManager:
             __save_end_epoch_logs()
 
         """ Save final model """
-
-
 
         # Save last check points, after every run
         torch.save(self.net_G_A2B.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_G_A2B/net_G_A2B.pth")
@@ -756,8 +765,6 @@ class RunCycleManager:
                 os.makedirs(os.path.join(path, "B"))
                 os.makedirs(os.path.join(path, "A", "epochs"))
                 os.makedirs(os.path.join(path, "B", "epochs"))
-                os.makedirs(os.path.join(path, "A", "logs"))
-                os.makedirs(os.path.join(path, "B", "logs"))
             except OSError:
                 pass
 
@@ -828,7 +835,7 @@ if __name__ == "__main__":
 
         """ Train a [S2D] model on the RGB dataset """
 
-        s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (68, 120), 3, False)
+        s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB", "train", (68, 120), 3, False)
         s2d_manager_RGB = RunCycleManager(s2d_dataset_train_RGB, 3, PARAMETERS)
         s2d_manager_RGB.start_cycle()
 
