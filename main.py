@@ -119,11 +119,11 @@ if __name__ == "__main__":
             #
             dataset_group = "s2d", 
             dataset_name = "Test_Set_RGB_DISPARITY",
-            model_date = "2021-04-12",
-            model_name = "23.01.17___EP80_DE50_LR0.0002_CH3",
+            model_date = "2021-04-15",
+            model_name = "14.54.41___EP100_DE050_LR0.0002_CH3",
             #
-            model_netG_A2B=f"net_G_A2B_epoch_17.pth",
-            model_netG_B2A=f"net_G_B2A_epoch_17.pth",
+            model_netG_A2B=f"net_G_A2B_epoch_70.pth",
+            model_netG_B2A=f"net_G_B2A_epoch_70.pth",
         )      
 
         pass
@@ -134,6 +134,9 @@ if __name__ == "__main__":
         except SystemExit:
             os._exit(0)
 
+
+# scherpte van de foto
+# kleuren ge-invert, testen: o
 
 
                 

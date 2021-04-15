@@ -146,12 +146,15 @@ class RunCycleManager:
             writer.writerow(
                 [
                     "Epoch",
-                    "Loss D(A)",
-                    "Loss D(B)",
+                    "Avg error D_A",
+                    "Avg error D_B",
+                    "Avg error G_A2B",
+                    "Avg error G_B2A",
+                    "Avg error net D",
+                    "AVg error net G",
+                    #
                     "Loss identity A",
                     "Loss identity B",
-                    "Loss GAN(A2B)",
-                    "Loss GAN(B2A)",
                     "Loss Cycle ABA",
                     "Loss Cycle BAB",
                     "G(A2B)_MSE(avg)",
@@ -215,6 +218,11 @@ class RunCycleManager:
             # Initiate the cumulative and average error for the discriminator
             self.cum_error_D_A, self.cum_error_D_B = 0, 0
             self.avg_error_D_A, self.avg_error_D_B = 0, 0
+
+            self.cum_error_G_A2B, self.cum_error_G_B2A = 0, 0
+            self.avg_error_G_A2B, self.avg_error_G_B2A = 0, 0
+
+            self.avg_error_net_D, self.avg_error_net_G = 0, 0
 
             # Iterate over the data loader
             for i, data in progress_bar:
@@ -290,6 +298,14 @@ class RunCycleManager:
                         + self.loss_cycle_ABA
                         + self.loss_cycle_BAB
                     )
+
+                    # Cumulative and average error of G_A2B
+                    self.cum_error_G_A2B += self.loss_GAN_A2B
+                    self.avg_error_G_A2B = self.cum_error_G_A2B / (i + 1)
+
+                    # Cumulative and average error of G_A2B
+                    self.cum_error_G_B2A += self.loss_GAN_B2A
+                    self.avg_error_G_B2A = self.cum_error_G_B2A / (i + 1)
 
                     # Calculate gradients for G_A and G_B
                     self.error_G.backward()
@@ -477,20 +493,31 @@ class RunCycleManager:
                     """
 
                     progress_bar.set_description(
-                        f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(loader)}] "
-                        # f"L_D(A): {error_D_A.item():.2f} "
-                        # f"L_D(B): {error_D_B.item():.2f} | "
-                        f"L_D(A+B): {((self.error_D_A + self.error_D_B) / 2).item():.3f} | "
-                        f"L_G(A2B): {self.loss_GAN_A2B.item():.3f} "
-                        f"L_G(B2A): {self.loss_GAN_B2A.item():.3f} | "
-                        # f"L_G_ID: {(loss_identity_A + loss_identity_B).item():.2f} "
-                        # f"L_G_GAN: {(loss_GAN_A2B + loss_GAN_B2A).item():.2f} "
-                        # f"L_G_CYCLE: {(loss_cycle_ABA + loss_cycle_BAB).item():.2f} "
-                        f"G(A2B)_MSE(avg): {(self.avg_mse_loss_A).item():.3f} "
-                        f"G(B2A)_MSE(avg): {(self.avg_mse_loss_B).item():.3f} | "
-                        f"G(A2B2A)_MSE(avg): {(self.avg_mse_loss_f_or_A).item():.3f} "
-                        f"G(B2A2B)_MSE(avg): {(self.avg_mse_loss_f_or_B).item():.3f} "
+                        f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(loader)}]  "
+                        f"avg. error D_A: {self.avg_error_D_A.item():.4f} "
+                        f"avg. error D_B: {self.avg_error_D_B.item():.4f}  ||  "
+                        f"avg. error G_B2A: {self.avg_error_G_A2B.item():.4f} "
+                        f"avg. error G_A2B: {self.avg_error_G_B2A.item():.4f}  ||  "
+                        f"avg. error net D: {self.avg_error_net_D:.4f} "
+                        f"avg. error net G: {self.avg_error_net_G:.4f}  ||  "
                     )
+
+
+                    # progress_bar.set_description(
+                    #     f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(loader)}] "
+                    #     # f"L_D(A): {error_D_A.item():.2f} "
+                    #     # f"L_D(B): {error_D_B.item():.2f} | "
+                    #     f"L_D_A(avg): {((self.error_D_A + self.error_D_B) / 2).item():.3f} | "
+                    #     f"L_G(A2B): {self.loss_GAN_A2B.item():.3f} "
+                    #     f"L_G(B2A): {self.loss_GAN_B2A.item():.3f} | "
+                    #     # f"L_G_ID: {(loss_identity_A + loss_identity_B).item():.2f} "
+                    #     # f"L_G_GAN: {(loss_GAN_A2B + loss_GAN_B2A).item():.2f} "
+                    #     # f"L_G_CYCLE: {(loss_cycle_ABA + loss_cycle_BAB).item():.2f} "
+                    #     f"G(A2B)_MSE(avg): {(self.avg_mse_loss_A).item():.3f} "
+                    #     f"G(B2A)_MSE(avg): {(self.avg_mse_loss_B).item():.3f} | "
+                    #     f"G(A2B2A)_MSE(avg): {(self.avg_mse_loss_f_or_A).item():.3f} "
+                    #     f"G(B2A2B)_MSE(avg): {(self.avg_mse_loss_f_or_B).item():.3f} "
+                    # )
 
                     pass
 
@@ -498,6 +525,56 @@ class RunCycleManager:
 
                 # Read data
                 __read_data()
+
+                THRESHOLD_ERROR_LOW = 0.2
+                THRESHOLD_ERROR_HIGH = 0.7
+
+                self.avg_error_net_D = (self.avg_error_D_A + self.avg_error_D_B) / 2
+                self.avg_error_net_G = (self.avg_error_G_A2B + self.avg_error_G_B2A) / 2
+
+                """
+
+                Write conditional training in here, ask for tips on how to do that cleverly.
+
+                if epoch >= 0 and i >= 10:
+                                        
+                    if (self.avg_error_net_D < THRESHOLD_ERROR_LOW) or (self.avg_error_net_G > THRESHOLD_ERROR_HIGH):
+                        # only train discriminator, generator too good
+
+                        # Update discriminator networks
+                        __update_discriminators()
+
+                        pass
+                        
+                    elif (self.avg_error_net_G < THRESHOLD_ERROR_LOW) or (self.avg_error_net_D > THRESHOLD_ERROR_HIGH):
+                        # only train generator, discriminator too good
+
+                        # Update generator networks
+                        __update_generators()
+
+                        pass
+
+                    else:
+
+                        # Update generator networks
+                        __update_generators()
+
+                        # Update discriminator networks
+                        __update_discriminators()
+
+                        pass
+                else:
+                    # train both, they are within the acceptable range
+
+                    # Update generator networks
+                    __update_generators()
+
+                    # Update discriminator networks
+                    __update_discriminators()
+
+                    pass
+
+                """
 
                 # Update generator networks
                 __update_generators()
@@ -577,12 +654,15 @@ class RunCycleManager:
                     writer.writerow(
                         [
                             epoch,
-                            f"{self.error_D_A.item():.4f}",
-                            f"{self.error_D_B.item():.4f}",
+                            f"{self.avg_error_D_A.item():.5f}",
+                            f"{self.avg_error_D_B.item():.5f}",
+                            f"{self.avg_error_G_A2B.item():.5f}",
+                            f"{self.avg_error_G_B2A.item():.5f}",
+                            f"{self.avg_error_net_D:.5f}",
+                            f"{self.avg_error_net_G:.5f}",
+                            #
                             f"{self.loss_identity_A.item():.4f}",
                             f"{self.loss_identity_B.item():.4f}",
-                            f"{self.loss_GAN_A2B.item():.4f}",
-                            f"{self.loss_GAN_B2A.item():.4f}",
                             f"{self.loss_cycle_ABA.item():.4f}",
                             f"{self.loss_cycle_BAB.item():.4f}",
                             f"{(self.avg_mse_loss_A).item():.4f}",
