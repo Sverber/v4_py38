@@ -44,8 +44,8 @@ class Left2RightDataset(Dataset):
 
         self.prefix = f"- [L2R][{name}][{mode}]"
 
-        print(f"{self.prefix} run_checks:", check_channels)
-        print(f"{self.prefix} transforms:", transforms, "\n")
+        # print(f"{self.prefix} run_checks:", check_channels)
+        # print(f"{self.prefix} transforms:", transforms, "\n")
 
         self.stereo_l = self.get_images(
             path=os.path.join(root, group, name, f"{mode}/left") + "/*.*",
@@ -149,8 +149,8 @@ class Stereo2DisparityDataset(Dataset):
 
         self.prefix = f"- [S2D][{name}][{mode}]"
 
-        print(f"{self.prefix} run_checks:", check_channels)
-        print(f"{self.prefix} transforms:", transforms, "\n")
+        # print(f"{self.prefix} run_checks:", check_channels)
+        # print(f"{self.prefix} transforms:", transforms, "\n")
 
         self.stereo_l = self.get_images(
             path=os.path.join(root, group, name, f"{mode}/A/left") + "/*.*",

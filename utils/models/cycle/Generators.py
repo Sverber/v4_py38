@@ -2,6 +2,7 @@ import torch.nn as nn
 
 from .ResidualBlock import ResidualBlock
 
+
 class Generator(nn.Module):
 
     """ Insert documentation """
@@ -22,21 +23,19 @@ class Generator(nn.Module):
             nn.ReflectionPad2d(3),
             nn.Conv2d(in_channels=self.in_channels, out_channels=64, kernel_size=(7, 7), stride=1, padding=0),
             nn.InstanceNorm2d(num_features=64),
-            nn.LeakyReLU(negative_slope=0.2, inplace=True),
+            nn.ReLU(inplace=True),
             nn.Dropout2d(self.dropout2d),
             #
             # Downsampling
             #
             nn.Conv2d(in_channels=64, out_channels=128, kernel_size=(3, 3), stride=2, padding=1),
             nn.InstanceNorm2d(num_features=128),
-            nn.LeakyReLU(negative_slope=0.2, inplace=True),
+            nn.ReLU(inplace=True),
             nn.Dropout2d(self.dropout2d),
-            #
-            # Downsampling
             #
             nn.Conv2d(in_channels=128, out_channels=256, kernel_size=(3, 3), stride=2, padding=1),
             nn.InstanceNorm2d(num_features=256),
-            nn.LeakyReLU(negative_slope=0.2, inplace=True),
+            nn.ReLU(inplace=True),
             nn.Dropout2d(self.dropout2d),
             #
             # Residual blocks
@@ -53,26 +52,22 @@ class Generator(nn.Module):
             #
             # Upsampling
             #
-            nn.ConvTranspose2d(
-                in_channels=256, out_channels=128, kernel_size=(3, 3), stride=2, padding=1, output_padding=1
-            ),
+            nn.ConvTranspose2d(in_channels=256, out_channels=128, kernel_size=(4, 4), stride=2, padding=1),
             nn.InstanceNorm2d(num_features=128),
-            nn.LeakyReLU(negative_slope=0.2, inplace=True),
+            nn.ReLU(inplace=True),
             nn.Dropout2d(self.dropout2d),
             #
             # Upsampling
             #
-            nn.ConvTranspose2d(
-                in_channels=128, out_channels=64, kernel_size=(3, 3), stride=2, padding=1, output_padding=1
-            ),
+            nn.ConvTranspose2d(in_channels=128, out_channels=64, kernel_size=(4, 4), stride=2, padding=1),
             nn.InstanceNorm2d(num_features=64),
-            nn.LeakyReLU(negative_slope=0.2, inplace=True),
+            nn.ReLU(inplace=True),
             nn.Dropout2d(self.dropout2d),
             #
             # Output layer
             #
             nn.ReflectionPad2d(3),
-            nn.Conv2d(in_channels=64, out_channels=self.out_channels, kernel_size=(7, 7)),
+            nn.Conv2d(in_channels=64, out_channels=self.out_channels, kernel_size=(7, 7), stride=1, padding=0),
             nn.Tanh(),
         )
 
@@ -108,6 +103,7 @@ class __Generator(nn.Module):
             nn.Conv2d(in_channels=64, out_channels=128, kernel_size=(3, 3), stride=2, padding=1),
             nn.InstanceNorm2d(num_features=128),
             nn.ReLU(inplace=True),
+            #
             nn.Conv2d(in_channels=128, out_channels=256, kernel_size=(3, 3), stride=2, padding=1),
             nn.InstanceNorm2d(num_features=256),
             nn.ReLU(inplace=True),
@@ -131,6 +127,9 @@ class __Generator(nn.Module):
             ),
             nn.InstanceNorm2d(num_features=128),
             nn.ReLU(inplace=True),
+            #
+            # Upsampling
+            #
             nn.ConvTranspose2d(
                 in_channels=128, out_channels=64, kernel_size=(3, 3), stride=2, padding=1, output_padding=1
             ),
@@ -140,7 +139,7 @@ class __Generator(nn.Module):
             # Output layer
             #
             nn.ReflectionPad2d(3),
-            nn.Conv2d(in_channels=64, out_channels=self.out_channels, kernel_size=(7, 7)),
+            nn.Conv2d(in_channels=64, out_channels=self.out_channels, kernel_size=(7, 7), stride=1, padding=0),
             nn.Tanh(),
         )
 
@@ -149,7 +148,6 @@ class __Generator(nn.Module):
         """ Insert documentation """
 
         return self.main(x)
-
 
 
 # class OneToMultiGenerator(nn.Module):

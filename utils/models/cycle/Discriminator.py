@@ -14,7 +14,7 @@ class Discriminator(nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
 
-        self.kernel_size = (6, 6)  # originally (4, 4)
+        self.kernel_size = (4, 4)  # originally (4, 4)
 
         self.dropout2d = 0.5
 
@@ -44,14 +44,16 @@ class Discriminator(nn.Module):
             #
             # Upsampling
             #
-            nn.Conv2d(256, 512, 4, padding=1),
+            nn.Conv2d(in_channels=256, out_channels=512, kernel_size=self.kernel_size, stride=2, padding=1),
             nn.InstanceNorm2d(num_features=512),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
             nn.Dropout2d(self.dropout2d),
             #
             # Output layer
             #
-            nn.Conv2d(in_channels=512, out_channels=self.out_channels, kernel_size=self.kernel_size, padding=1),
+            nn.Conv2d(
+                in_channels=512, out_channels=self.out_channels, kernel_size=self.kernel_size, stride=2, padding=1
+            ),
         )
 
     def forward(self, x):
