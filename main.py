@@ -111,20 +111,20 @@ if __name__ == "__main__":
 
         """ Test a neural network """
 
-        s2d_dataset_test_RGB_DISPARITY = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "test", (68, 120), 3, False)
+        # s2d_dataset_test_RGB_DISPARITY = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "test", (68, 120), 3, False)
 
-        test(  
-            parameters=PARAMETERS,
-            dataset=s2d_dataset_test_RGB_DISPARITY,
-            #
-            dataset_group = "s2d", 
-            dataset_name = "Test_Set_RGB_DISPARITY",
-            model_date = "2021-04-15",
-            model_name = "14.54.41___EP100_DE050_LR0.0002_CH3",
-            #
-            model_netG_A2B=f"net_G_A2B_epoch_70.pth",
-            model_netG_B2A=f"net_G_B2A_epoch_70.pth",
-        )      
+        # test(  
+        #     parameters=PARAMETERS,
+        #     dataset=s2d_dataset_test_RGB_DISPARITY,
+        #     #
+        #     dataset_group = "s2d", 
+        #     dataset_name = "Test_Set_RGB_DISPARITY",
+        #     model_date = "2021-04-15",
+        #     model_name = "14.54.41___EP100_DE050_LR0.0002_CH3",
+        #     #
+        #     model_netG_A2B=f"net_G_A2B_epoch_70.pth",
+        #     model_netG_B2A=f"net_G_B2A_epoch_70.pth",
+        # )      
 
         pass
 

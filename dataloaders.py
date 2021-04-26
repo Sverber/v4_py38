@@ -268,7 +268,7 @@ class MyDataLoader:
                 group=dataset_group,
                 mode=dataset_mode,
                 name=dataset_name,
-                tFsforms=self.__get_transforms(channels, image_size),
+                transforms=self.__get_transforms(channels, image_size),
                 channels=channels,
                 check_channels=check_channels,
             )

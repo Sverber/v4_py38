@@ -10,10 +10,9 @@ from PIL import Image, ImageOps
 from torch.utils.data import Dataset
 from torchvision import transforms
 
-
 class StereoDisparityDataset(Dataset):
 
-    """ Insert documentation for ImageDataset class """
+    """ Insert documentation for StereoDisparityDataset class """
 
     def __init__(
         self, root, mode: str = "train", transforms: transforms = None,
