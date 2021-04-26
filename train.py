@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 from __future__ import absolute_import, division, print_function
 
+#%matplotlib inline
+
 import os
 import csv
 import sys
@@ -17,7 +19,6 @@ from torchvision.transforms.transforms import Grayscale
 import torchvision.utils as vutils
 import torchvision.transforms as transforms
 
-
 from PIL import Image
 from tqdm import tqdm
 from datetime import datetime
@@ -25,6 +26,9 @@ from itertools import product
 from collections import namedtuple
 from collections import OrderedDict
 from skimage.metrics import structural_similarity as ssim
+
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 
 from torch.utils.data.dataloader import DataLoader
 from synthesis.Synthesis import Synthesis
@@ -79,7 +83,7 @@ class RunCycleManager:
         dir_results: str = "./results",
         dir_weights: str = "./weights",
         save_epoch_freq: int = 1,
-        show_image_freq: int = 10,
+        show_image_freq: int = 25,
         validation_percentage: float = 0.0,
     ) -> None:
 
@@ -178,10 +182,18 @@ class RunCycleManager:
                 dataset=self.dataset, batch_size=run.batch_size, num_workers=run.num_workers, shuffle=run.shuffle
             )
 
+            # Keep track of the per-epoch losses
+            self.losses_G_A, self.losses_G_B = [], []
+            self.losses_D_A, self.losses_D_B = [], []
+
             """ Iterate over the epochs in the run """
 
             # Iterate through all the epochs
             for epoch in range(0, run.num_epochs):
+
+                # Keep track of the per-batch losses during one epoch
+                self.batch_losses_G_A, self.batch_losses_G_B = [], []
+                self.batch_losses_D_A, self.batch_losses_D_B = [], []
 
                 # Create a per-batch csv log file
                 self.__create_per_batch_csv_logs(epoch)
@@ -199,18 +211,7 @@ class RunCycleManager:
 
                     try:
 
-                        """ Get the index of the split of the train/validation set """
-
                         """ Determine whether this batch is for training or validation """
-
-                        # # Get the index from which the dataset is considered to be validation data
-                        # validation_at_index = int(len(self.loader) * (1 - self.validation_percentage)) - 1
-
-                        # # Determine whether this batch is a validation batch or not
-                        # # if i >= validation_at_index:
-                        # #     self.batch_is_validation = True
-                        # # else:
-                        # #     self.batch_is_validation = False
 
                         self.batch_is_validation = self.__is_batch_validation(i)
 
@@ -242,6 +243,9 @@ class RunCycleManager:
                         # Save per-epoch logs
                         self.__save_per_epoch_logs(epoch)
 
+                        # Save the per-batch losses in a plot
+                        self.__save_plot_per_batch(i, epoch)
+
                         # Print a progress bar in the terminal
                         self.__print_progress(i, epoch, run)
 
@@ -261,6 +265,9 @@ class RunCycleManager:
 
                 # Save some logs at the end of each epoch
                 self.__save_end_epoch_logs(epoch)
+
+                # Save the losses in a plot of each epoch
+                self.__save_plot_per_epoch()
 
             """ Save final model """
 
@@ -398,8 +405,8 @@ class RunCycleManager:
             raise Exception(f"Can not read input images, given group '{self.dataset_group}' is incorrect.")
 
         # Real data label is 1, fake data label is 0.
-        self.real_label = torch.full((run.batch_size, 1), 1, device=run.device, dtype=torch.float32)
-        self.fake_label = torch.full((run.batch_size, 1), 0, device=run.device, dtype=torch.float32)
+        self.real_label = torch.full((run.batch_size, self.channels), 1, device=run.device, dtype=torch.float32)
+        self.fake_label = torch.full((run.batch_size, self.channels), 0, device=run.device, dtype=torch.float32)
 
         pass
 
@@ -680,17 +687,17 @@ class RunCycleManager:
             # Filepath and filename for the real-time TRAINING output images
             (
                 filepath_real_A,
-                filepath_real_noise_A,
                 filepath_real_B,
-                filepath_real_noise_B,
+                filepath_real_A_noise,
+                filepath_real_B_noise,
                 filepath_fake_A,
                 filepath_fake_B,
                 # filepath_f_or_A,
                 # filepath_f_or_B,
             ) = (
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/real_sample.png",
-                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/real_sample_noise.png",
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/real_sample.png",
+                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/real_sample_noise.png",
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/real_sample_noise.png",
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/fake_sample.png",
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/fake_sample.png",
@@ -703,17 +710,17 @@ class RunCycleManager:
             #  Filepath and filename for the real-time VALIDATION output images
             (
                 filepath_real_A,
-                filepath_real_noise_A,
                 filepath_real_B,
-                filepath_real_noise_B,
+                filepath_real_A_noise,
+                filepath_real_B_noise,
                 filepath_fake_A,
                 filepath_fake_B,
                 # filepath_f_or_A,
                 # filepath_f_or_B,
             ) = (
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__real_sample.png",
-                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__real_sample_noise.png",
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__real_sample.png",
+                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__real_sample_noise.png",
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__real_sample_noise.png",
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__fake_sample.png",
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__fake_sample.png",
@@ -726,8 +733,8 @@ class RunCycleManager:
         vutils.save_image(self.real_image_B, filepath_real_B, normalize=True)
 
         # Save real input images with noise
-        vutils.save_image(self.real_image_A_noise, filepath_real_noise_A, normalize=True)
-        vutils.save_image(self.real_image_B_noise, filepath_real_noise_B, normalize=True)
+        vutils.save_image(self.real_image_A_noise, filepath_real_A_noise, normalize=True)
+        vutils.save_image(self.real_image_B_noise, filepath_real_B_noise, normalize=True)
 
         # Save the generated (fake) image
         vutils.save_image(self.fake_image_A.detach(), filepath_fake_A, normalize=True)
@@ -813,6 +820,8 @@ class RunCycleManager:
         (
             filepath_real_A,
             filepath_real_B,
+            filepath_real_A_noise,
+            filepath_real_B_noise,
             filepath_fake_A,
             filepath_fake_B,
             # filepath_f_or_A,
@@ -831,10 +840,10 @@ class RunCycleManager:
         # Save real input images
         vutils.save_image(self.real_image_A, filepath_real_A, normalize=True)
         vutils.save_image(self.real_image_B, filepath_real_B, normalize=True)
-        
+
         # Save real input images with noise
-        vutils.save_image(self.real_image_A_noise, filepath_real_A, normalize=True)
-        vutils.save_image(self.real_image_B_noise, filepath_real_B, normalize=True)
+        vutils.save_image(self.real_image_A_noise, filepath_real_A_noise, normalize=True)
+        vutils.save_image(self.real_image_B_noise, filepath_real_B_noise, normalize=True)
 
         # Save the generated (fake) image
         vutils.save_image(self.fake_image_A.detach(), filepath_fake_A, normalize=True)
@@ -877,12 +886,88 @@ class RunCycleManager:
 
         pass
 
+    """ [ Private functions ] Plotting function """
+
+    def __save_plot_per_batch(self, i, epoch) -> None:
+
+        """ Append the current per-batch losses to the arrays containing the network losses """
+
+        self.batch_losses_G_A.append(self.error_G_A.cpu().detach().numpy())
+        self.batch_losses_G_B.append(self.error_G_B.cpu().detach().numpy())
+        self.batch_losses_D_A.append(self.error_D_A.cpu().detach().numpy())
+        self.batch_losses_D_B.append(self.error_D_B.cpu().detach().numpy())
+
+        """ Plot losses """
+
+        if i % self.SHOW_IMAGE_FREQ  == 0 :
+            self.per_batch_figure, self.per_batch_axes = plt.subplots(2)
+
+            self.per_batch_axes[0].set_title(f"Generator A and Discriminator A loss during epoch {epoch}")
+            self.per_batch_axes[1].set_title(f"Generator B and Discriminator B loss during epoch {epoch}")
+
+            self.per_batch_axes[0].set(xlabel="Batch", ylabel="Loss")
+            self.per_batch_axes[1].set(xlabel="Batch", ylabel="Loss")
+
+            self.per_batch_axes[0].plot(self.batch_losses_G_A, label="G_A")
+            self.per_batch_axes[0].plot(self.batch_losses_D_A, label="D_A")
+
+            self.per_batch_axes[1].plot(self.batch_losses_G_B, label="G_B")
+            self.per_batch_axes[1].plot(self.batch_losses_D_B, label="D_B")
+
+            self.per_batch_axes[0].legend()
+            self.per_batch_axes[1].legend()
+
+            self.per_batch_figure.tight_layout(h_pad=2.0, w_pad=0.0)
+            self.per_batch_figure.savefig(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/plots/EP{epoch}__plot.png")
+
+            plt.close(self.per_batch_figure)
+            plt.close("all")
+
+        pass
+
+    def __save_plot_per_epoch(self) -> None:
+
+        """ Append the current average losses to the arrays containing the network losses """
+
+        self.losses_G_A.append(self.avg_error_G_A)
+        self.losses_G_B.append(self.avg_error_G_B)
+        self.losses_D_A.append(self.avg_error_D_A)
+        self.losses_D_B.append(self.avg_error_D_B)
+
+        """ Plot losses """
+
+        self.per_epoch_figure, self.per_epoch_axes = plt.subplots(2)
+
+        self.per_epoch_axes[0].set_title(f"Generator A and Discriminator A loss during training")
+        self.per_epoch_axes[1].set_title(f"Generator B and Discriminator B loss during training")
+
+        self.per_epoch_axes[0].set(xlabel="Iteration", ylabel="Loss")
+        self.per_epoch_axes[1].set(xlabel="Iteration", ylabel="Loss")
+
+        self.per_epoch_axes[0].plot(self.losses_G_A, label="G_A")
+        self.per_epoch_axes[0].plot(self.losses_D_A, label="D_A")
+
+        self.per_epoch_axes[1].plot(self.losses_G_B, label="G_B")
+        self.per_epoch_axes[1].plot(self.losses_D_B, label="D_B")
+
+        self.per_epoch_axes[0].legend()
+        self.per_epoch_axes[1].legend()
+
+        self.per_epoch_figure.tight_layout(h_pad=2.0, w_pad=0.0)
+        self.per_epoch_figure.savefig(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/plot.png")
+
+        plt.close(self.per_epoch_figure)
+        plt.close("all")
+
+        pass
+
     @staticmethod
     def makedirs(path: str, dir: str):
 
         if dir == "outputs":
             try:
                 os.makedirs(os.path.join(path, "logs"))
+                os.makedirs(os.path.join(path, "plots"))
                 os.makedirs(os.path.join(path, "A"))
                 os.makedirs(os.path.join(path, "B"))
                 os.makedirs(os.path.join(path, "A", "epochs"))
@@ -900,7 +985,7 @@ class RunCycleManager:
                 pass
 
     @staticmethod
-    def get_run_path(run, dataset_name: str, channels: int) -> str:
+    def get_run_path(run, dataset_name: str, channels: int, use_one_directory: bool = True) -> str:
 
         # Store today's date in string format
         TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
@@ -912,6 +997,9 @@ class RunCycleManager:
         RUN_NAME = f"{TODAY_TIME}___EP{str(run.num_epochs).zfill(digits)}_DE{str(run.decay_epochs).zfill(digits)}_LR{run.learning_rate}_CH{channels}"
 
         RUN_PATH = f"{dataset_name}/{TODAY_DATE}/{RUN_NAME}"
+
+        if use_one_directory:
+            RUN_PATH = f"{dataset_name}/QUICK_DEV_DIR"
 
         return RUN_PATH
 
