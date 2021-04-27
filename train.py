@@ -23,22 +23,23 @@ from PIL import Image
 from tqdm import tqdm
 from datetime import datetime
 from itertools import product
+from matplotlib import rcParams
 from collections import namedtuple
 from collections import OrderedDict
 from skimage.metrics import structural_similarity as ssim
 
+rcParams["font.family"] = "sans-serif"
+rcParams["font.sans-serif"] = ["Tahoma", "DejaVu Sans", "Lucida Grande", "Verdana"]
 
 from torch.utils.data.dataloader import DataLoader
 
-from utils.functions.initialize_weights import initialize_weights
 from utils.classes.DecayLR import DecayLR
 from utils.classes.ReplayBuffer import ReplayBuffer
-from utils.models.cycle.Discriminator import Discriminator
 from utils.models.cycle.Generators import Generator
+from utils.models.cycle.Discriminator import Discriminator
+from utils.functions.initialize_weights import initialize_weights
 
 from dataloaders import MyDataLoader
-
-from test import test
 
 os.system("cls")
 
@@ -75,7 +76,7 @@ class RunCycleManager:
         dir_results: str = "./results",
         dir_weights: str = "./weights",
         save_epoch_freq: int = 1,
-        show_image_freq: int = 10,
+        show_image_freq: int = 3,
         validation_percentage: float = 0.0,
     ) -> None:
 
@@ -267,7 +268,7 @@ class RunCycleManager:
                 self.__save_end_epoch_logs(epoch)
 
                 # Save the losses in a plot of each epoch
-                self.__save_plot_per_epoch()
+                self.__save_plot_per_epoch(epoch)
 
             """ Save final model """
 
@@ -385,7 +386,7 @@ class RunCycleManager:
 
         pass
 
-    def __random_flip(self, real_label: torch.Tensor, fake_label: torch.Tensor, probability: float = 0.10):
+    def __random_flip(self, real_label: torch.Tensor, fake_label: torch.Tensor, probability: float = 0.1):
 
         """ Randomly flip labels following a given probability """
 
@@ -459,8 +460,8 @@ class RunCycleManager:
         """ Label smoothing and random flipping """
 
         # Smoothen the labels (only used by the discriminator)
-        self.real_smooth_label = self.__smooth_one_hot(self.real_label, 2, 0.15)
-        self.fake_smooth_label = self.__smooth_one_hot(self.fake_label, 2, 0.15)
+        self.real_smooth_label = self.__smooth_one_hot(self.real_label, 2, 0.1)
+        self.fake_smooth_label = self.__smooth_one_hot(self.fake_label, 2, 0.1)
 
         # Randomly flip the smooth labels (only used by the discriminator)
         self.real_smooth_label, self.fake_smooth_label = self.__random_flip(
@@ -494,15 +495,15 @@ class RunCycleManager:
 
         """ Identity loss: helps to preserve colour and prevent reverse colour in the result  """
 
-        # # Identity loss of B2A
-        # # G_B2A(A) should equal A if real A is fed
-        # self.identity_image_A = self.net_G_B2A(self.real_image_A)
-        # self.loss_identity_A = self.identity_loss(self.identity_image_A, self.real_image_A) * 5.0
+        # Identity loss of B2A
+        # G_B2A(A) should equal A if real A is fed
+        self.identity_image_A = self.net_G_B2A(self.real_image_A)
+        self.loss_identity_A = self.identity_loss(self.identity_image_A, self.real_image_A) * 5.0
 
-        # # Identity loss of A2B
-        # # G_A2B(B) should equal B if real B is fed
-        # self.identity_image_B = self.net_G_A2B(self.real_image_B)
-        # self.loss_identity_B = self.identity_loss(self.identity_image_B, self.real_image_B) * 5.0
+        # Identity loss of A2B
+        # G_A2B(B) should equal B if real B is fed
+        self.identity_image_B = self.net_G_A2B(self.real_image_B)
+        self.loss_identity_B = self.identity_loss(self.identity_image_B, self.real_image_B) * 5.0
 
         """ Cycle loss """
 
@@ -517,10 +518,10 @@ class RunCycleManager:
         if self.batch_is_validation == False:
 
             # Error G_A (removed: self.loss_identity_A)
-            self.error_G_A = self.loss_GAN_A2B + self.loss_cycle_ABA
+            self.error_G_A = self.loss_GAN_A2B + self.loss_identity_A + self.loss_cycle_ABA
 
             # Error G_B (removed: self.loss_identity_B)
-            self.error_G_B = self.loss_GAN_B2A + self.loss_cycle_BAB
+            self.error_G_B = self.loss_GAN_B2A + self.loss_identity_B + self.loss_cycle_BAB
 
             # Average error on G_A
             self.cum_error_G_A += self.error_G_A
@@ -664,11 +665,11 @@ class RunCycleManager:
         # self.fake_original_image_A = self.net_G_B2A(self.identity_image_A)
         # self.fake_original_image_B = self.net_G_A2B(self.identity_image_B)
 
-        # # Convert to usable images
+        # # Convert to usable images (changes the tensor range from [-1, 1] to [0, 1])
         # self.fake_image_A = 0.5 * (self.fake_image_A.data + 1.0)
         # self.fake_image_B = 0.5 * (self.fake_image_B.data + 1.0)
 
-        # # Convert to usable images
+        # # Convert to usable images (changes the tensor range from [-1, 1] to [0, 1])
         # self.fake_original_image_A = 0.5 * (self.fake_original_image_A.data + 1.0)
         # self.fake_original_image_B = 0.5 * (self.fake_original_image_B.data + 1.0)
 
@@ -952,32 +953,65 @@ class RunCycleManager:
         """ Plot losses """
 
         if i % self.SHOW_IMAGE_FREQ == 0:
-            self.per_batch_figure, self.per_batch_axes = plt.subplots(2)
 
+            # Create figure
+            self.per_batch_figure, self.per_batch_axes = plt.subplots(2, sharex=True)
+
+            # Set titles
             self.per_batch_axes[0].set_title(f"Generator A and Generator B loss during epoch {epoch}")
             self.per_batch_axes[1].set_title(f"Discriminator A and Discriminator B loss during epoch {epoch}")
 
+            # Set labels
             self.per_batch_axes[0].set(xlabel="Batch", ylabel="G Loss")
-            self.per_batch_axes[1].set(xlabel="Batch", ylabel="L Loss")
+            self.per_batch_axes[1].set(xlabel="Batch", ylabel="D Loss").set_ylim(bottom=-0.5)
 
+            # Set y limits
+            self.per_batch_axes[0].set_ylim(bottom=-0.5)
+            self.per_batch_axes[1].set_ylim(bottom=-0.5)
+
+            # Add gridlines
+            self.per_batch_axes[0].grid()
+            self.per_batch_axes[1].grid()
+
+            # Plot generator values
             self.per_batch_axes[0].plot(self.batch_losses_G_A, label="G_A", color="tab:blue")
-            self.per_batch_axes[0].plot(self.batch_losses_G_B, label="G_B", color="tab:red")
+            self.per_batch_axes[0].plot(self.batch_losses_G_B, label="G_B", color="tab:orange")
 
-            self.per_batch_axes[1].plot(self.batch_losses_D_A, label="D_A", color="tab:green")
+            # Fill between generator values
+            self.per_batch_axes[0].fill_between(
+                x=np.arange(i + 1), y1=0, y2=self.batch_losses_G_A, facecolor="tab:blue", alpha=0.5
+            )
+            self.per_batch_axes[0].fill_between(
+                x=np.arange(i + 1), y1=0, y2=self.batch_losses_G_B, facecolor="tab:orange", alpha=0.5
+            )
+
+            # Plot discriminator values
+            self.per_batch_axes[1].plot(self.batch_losses_D_A, label="D_A", color="tab:blue")
             self.per_batch_axes[1].plot(self.batch_losses_D_B, label="D_B", color="tab:orange")
 
-            self.per_batch_axes[0].legend()
-            self.per_batch_axes[1].legend()
+            # Fill between discriminator values
+            self.per_batch_axes[1].fill_between(
+                x=np.arange(i + 1), y1=0, y2=self.batch_losses_D_A, facecolor="tab:blue", alpha=0.5
+            )
+            self.per_batch_axes[1].fill_between(
+                x=np.arange(i + 1), y1=0, y2=self.batch_losses_D_B, facecolor="tab:orange", alpha=0.5
+            )
 
+            # Add legends
+            self.per_batch_axes[0].legend(loc="upper right", frameon=True).get_frame()
+            self.per_batch_axes[1].legend(loc="upper right", frameon=True).get_frame()
+
+            # Adjust layout and save
             self.per_batch_figure.tight_layout(h_pad=2.0, w_pad=0.0)
             self.per_batch_figure.savefig(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/plots/EP{epoch}__plot.png")
 
+            # Close figure
             plt.close(self.per_batch_figure)
             plt.close("all")
 
         pass
 
-    def __save_plot_per_epoch(self) -> None:
+    def __save_plot_per_epoch(self, epoch) -> None:
 
         """ Append the current average losses to the arrays containing the network losses """
 
@@ -988,26 +1022,58 @@ class RunCycleManager:
 
         """ Plot losses """
 
-        self.per_epoch_figure, self.per_epoch_axes = plt.subplots(2)
+        # Create figure
+        self.per_epoch_figure, self.per_epoch_axes = plt.subplots(2, sharex=True)
 
-        self.per_epoch_axes[0].set_title(f"Generator A and Generator B avg. loss during training")
-        self.per_epoch_axes[1].set_title(f"Discriminator A and Discriminator B avg. loss during training")
+        # Set titles
+        self.per_epoch_axes[0].set_title(f"Generator A and Generator B loss during training")
+        self.per_epoch_axes[1].set_title(f"Discriminator A and Discriminator B loss training")
 
-        self.per_epoch_axes[0].set(xlabel="Iteration", ylabel="Loss")
-        self.per_epoch_axes[1].set(xlabel="Iteration", ylabel="Loss")
+        # Set labels
+        self.per_epoch_axes[0].set(xlabel="Batch", ylabel="G Loss")
+        self.per_epoch_axes[1].set(xlabel="Batch", ylabel="D Loss")
 
+        # Set y limits
+        self.per_epoch_axes[0].set_ylim(bottom=-0.5)
+        self.per_epoch_axes[1].set_ylim(bottom=-0.5)
+
+        # Add gridlines
+        self.per_epoch_axes[0].grid()
+        self.per_epoch_axes[1].grid()
+
+        # Plot generator values
         self.per_epoch_axes[0].plot(self.losses_G_A, label="G_A", color="tab:blue")
-        self.per_epoch_axes[0].plot(self.losses_G_B, label="G_B", color="tab:red")
+        self.per_epoch_axes[0].plot(self.losses_G_B, label="G_B", color="tab:orange")
 
-        self.per_epoch_axes[1].plot(self.losses_D_A, label="D_A", color="tab:green")
+        # Fill between generator values
+        self.per_epoch_axes[0].fill_between(
+            x=np.arange(i + 1), y1=0, y2=self.losses_G_A, facecolor="tab:blue", alpha=0.5
+        )
+        self.per_epoch_axes[0].fill_between(
+            x=np.arange(i + 1), y1=0, y2=self.losses_G_B, facecolor="tab:orange", alpha=0.5
+        )
+
+        # Plot discriminator values
+        self.per_epoch_axes[1].plot(self.losses_D_A, label="D_A", color="tab:blue")
         self.per_epoch_axes[1].plot(self.losses_D_B, label="D_B", color="tab:orange")
 
-        self.per_epoch_axes[0].legend()
-        self.per_epoch_axes[1].legend()
+        # Fill between discriminator values
+        self.per_epoch_axes[1].fill_between(
+            x=np.arange(epoch + 1), y1=0, y2=self.losses_D_A, facecolor="tab:blue", alpha=0.5
+        )
+        self.per_epoch_axes[1].fill_between(
+            x=np.arange(epoch + 1), y1=0, y2=self.losses_D_B, facecolor="tab:orange", alpha=0.5
+        )
 
+        # Add legends
+        self.per_epoch_axes[0].legend(loc="upper right", frameon=True).get_frame()
+        self.per_epoch_axes[1].legend(loc="upper right", frameon=True).get_frame()
+
+        # Adjust layout and save
         self.per_epoch_figure.tight_layout(h_pad=2.0, w_pad=0.0)
         self.per_epoch_figure.savefig(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/plot.png")
 
+        # Close figure
         plt.close(self.per_epoch_figure)
         plt.close("all")
 
@@ -1051,7 +1117,7 @@ class RunCycleManager:
         RUN_PATH = f"{dataset_name}/{TODAY_DATE}/{RUN_NAME}"
 
         if use_one_directory:
-            RUN_PATH = f"{dataset_name}/QUICK_DEV_DIR"
+            RUN_PATH = f"QUICK_DEV_DIR"
 
         return RUN_PATH
 
@@ -1100,8 +1166,10 @@ if __name__ == "__main__":
         # s2d_manager_RGB = RunCycleManager(s2d_dataset_train_RGB, 3, PARAMETERS)
         # s2d_manager_RGB.start_cycle()
 
-        s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (68, 120), 3, False)
-        s2d_manager_RGB = RunCycleManager(s2d_dataset_train_RGB, 3, PARAMETERS)
+        """ _____________ """
+
+        s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (68, 120), 1, False)
+        s2d_manager_RGB = RunCycleManager(s2d_dataset_train_RGB, 1, PARAMETERS)
         s2d_manager_RGB.start_cycle()
 
     except KeyboardInterrupt:
