@@ -14,7 +14,7 @@ class Generator(nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
 
-        self.dropout2d = 0.5
+        self.dropout2d = 0.25
 
         self.main = nn.Sequential(
             #

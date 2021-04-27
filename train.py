@@ -9,13 +9,13 @@ import sys
 import time
 import random
 import numpy as np
+import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
 import torch.utils.data
 import torch.utils.data.distributed
-from torchvision.transforms.transforms import Grayscale
 import torchvision.utils as vutils
 import torchvision.transforms as transforms
 
@@ -27,20 +27,12 @@ from collections import namedtuple
 from collections import OrderedDict
 from skimage.metrics import structural_similarity as ssim
 
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 
 from torch.utils.data.dataloader import DataLoader
-from synthesis.Synthesis import Synthesis
 
 from utils.functions.initialize_weights import initialize_weights
-
-from utils.classes.AddGaussianNoise import AddGaussianNoise
-from utils.classes.GaussianNoise import GaussianNoise
-
 from utils.classes.DecayLR import DecayLR
 from utils.classes.ReplayBuffer import ReplayBuffer
-
 from utils.models.cycle.Discriminator import Discriminator
 from utils.models.cycle.Generators import Generator
 
@@ -83,7 +75,7 @@ class RunCycleManager:
         dir_results: str = "./results",
         dir_weights: str = "./weights",
         save_epoch_freq: int = 1,
-        show_image_freq: int = 25,
+        show_image_freq: int = 10,
         validation_percentage: float = 0.0,
     ) -> None:
 
@@ -151,7 +143,7 @@ class RunCycleManager:
             self.net_D_A.apply(initialize_weights)
             self.net_D_B.apply(initialize_weights)
 
-            # define loss function (adversarial_loss)
+            # define loss functions
             self.cycle_loss = torch.nn.L1Loss().to(run.device)
             self.identity_loss = torch.nn.L1Loss().to(run.device)
             self.adversarial_loss = torch.nn.MSELoss().to(run.device)
@@ -194,6 +186,7 @@ class RunCycleManager:
                 # Keep track of the per-batch losses during one epoch
                 self.batch_losses_G_A, self.batch_losses_G_B = [], []
                 self.batch_losses_D_A, self.batch_losses_D_B = [], []
+                self.full_batch_losses_G_A, self.full_batch_losses_G_B = [], []
 
                 # Create a per-batch csv log file
                 self.__create_per_batch_csv_logs(epoch)
@@ -223,13 +216,20 @@ class RunCycleManager:
                         # Update generator networks
                         self.__update_generators(i)
 
+                        # Add noise to the discriminator input
+                        self.__add_discriminator_noise(epoch, run)
+
+                        # # Update discriminator networks
+                        # self.__update_discriminators(i)
+                        # self.skip_discriminator = False
+
                         # Update discriminator networks, conditionally
-                        if i > 15 and (self.avg_error_D_A + self.avg_error_D_B) / 2 < 0.5:
+                        if i > 10 and (self.avg_error_D_A + self.avg_error_D_B) / 2 < 0.40:
                             self.skip_discriminator = True
 
                         else:
                             self.skip_discriminator = False
-                            self.__update_discriminators(i, run)
+                            self.__update_discriminators(i)
 
                         # # Regerate original input
                         # __regenerate_inputs()
@@ -238,7 +238,7 @@ class RunCycleManager:
                         # __update_losses()
 
                         # Save the real-time output images for every {SHOW_IMG_FREQ} images
-                        self.__save_realtime_output()
+                        self.__save_realtime_output(i)
 
                         # Save per-epoch logs
                         self.__save_per_epoch_logs(epoch)
@@ -298,7 +298,7 @@ class RunCycleManager:
         validation_at_index = int(len(self.loader) * (1 - self.validation_percentage)) - 1
 
         # Determine whether this batch is a validation batch or not
-        if i >= validation_at_index:
+        if i > validation_at_index:
             return True
         else:
             return False
@@ -385,6 +385,25 @@ class RunCycleManager:
 
         pass
 
+    def __random_flip(self, real_label: torch.Tensor, fake_label: torch.Tensor, probability: float = 0.10):
+
+        """ Randomly flip labels following a given probability """
+
+        random_percentage = random.uniform(0, 1)
+
+        if random_percentage > probability:
+            return real_label, fake_label
+        else:
+            return fake_label, real_label
+
+    def __smooth_one_hot(self, true_label: torch.Tensor, classes: int, smoothing: float = 0.1):
+
+        """ Smoothen one-hot encoced labels y_ls = (1 - α) * y_hot + α / K """
+
+        smooth_label = (1 - smoothing) * true_label + smoothing / classes
+
+        return smooth_label
+
     def __read_data(self, run, data) -> None:
 
         # Get image A and image B
@@ -407,6 +426,46 @@ class RunCycleManager:
         # Real data label is 1, fake data label is 0.
         self.real_label = torch.full((run.batch_size, self.channels), 1, device=run.device, dtype=torch.float32)
         self.fake_label = torch.full((run.batch_size, self.channels), 0, device=run.device, dtype=torch.float32)
+
+        pass
+
+    def __add_discriminator_noise(self, epoch, run) -> None:
+
+        """ Add decaying Gaussian noise to discriminator A and B real/fake inputs """
+
+        mean, std = 0.5, 0.5
+
+        if epoch > 0:
+            self.noise_factor = round(1 - (epoch / run.num_epochs), 3)
+        else:
+            self.noise_factor = 1
+
+        # Create the noise for the real images
+        noise_real_A = (torch.randn(self.real_image_A.size()) * std + mean).to(run.device)
+        noise_real_B = (torch.randn(self.real_image_B.size()) * std + mean).to(run.device)
+
+        # Create the noise for the fake images
+        noise_fake_A = (torch.randn(self.fake_image_A.size()) * std + mean).to(run.device)
+        noise_fake_B = (torch.randn(self.fake_image_B.size()) * std + mean).to(run.device)
+
+        # Add decaying noise to the real images
+        self.real_image_A_noise = self.real_image_A + (noise_real_A * self.noise_factor)
+        self.real_image_B_noise = self.real_image_B + (noise_real_B * self.noise_factor)
+
+        # Add decaying noise to the fake images
+        self.fake_image_A_noise = self.fake_image_A + (noise_fake_A * self.noise_factor)
+        self.fake_image_B_noise = self.fake_image_B + (noise_fake_B * self.noise_factor)
+
+        """ Label smoothing and random flipping """
+
+        # Smoothen the labels (only used by the discriminator)
+        self.real_smooth_label = self.__smooth_one_hot(self.real_label, 2, 0.15)
+        self.fake_smooth_label = self.__smooth_one_hot(self.fake_label, 2, 0.15)
+
+        # Randomly flip the smooth labels (only used by the discriminator)
+        self.real_smooth_label, self.fake_smooth_label = self.__random_flip(
+            self.real_smooth_label, self.fake_smooth_label, 0.10
+        )
 
         pass
 
@@ -433,7 +492,7 @@ class RunCycleManager:
         self.fake_output_B = self.net_D_B(self.fake_image_B)
         self.loss_GAN_A2B = self.adversarial_loss(self.fake_output_B, self.real_label)
 
-        """ Identity loss """
+        """ Identity loss: helps to preserve colour and prevent reverse colour in the result  """
 
         # # Identity loss of B2A
         # # G_B2A(A) should equal A if real A is fed
@@ -447,29 +506,21 @@ class RunCycleManager:
 
         """ Cycle loss """
 
-        # # Cycle loss
-        # self.recovered_image_A = self.net_G_B2A(self.fake_image_B)
-        # self.loss_cycle_ABA = self.cycle_loss(self.recovered_image_A, self.real_image_A) * 10.0
+        # Cycle loss
+        self.recovered_image_A = self.net_G_B2A(self.fake_image_B)
+        self.loss_cycle_ABA = self.cycle_loss(self.recovered_image_A, self.real_image_A) * 10.0
 
-        # self.recovered_image_B = self.net_G_A2B(self.fake_image_A)
-        # self.loss_cycle_BAB = self.cycle_loss(self.recovered_image_B, self.real_image_B) * 10.0
+        self.recovered_image_B = self.net_G_A2B(self.fake_image_A)
+        self.loss_cycle_BAB = self.cycle_loss(self.recovered_image_B, self.real_image_B) * 10.0
 
         # Only update weights when using training data
         if self.batch_is_validation == False:
 
-            # Error G_A
-            self.error_G_A = (
-                self.loss_GAN_A2B
-                # + self.loss_identity_A
-                # + self.loss_cycle_ABA
-            )
+            # Error G_A (removed: self.loss_identity_A)
+            self.error_G_A = self.loss_GAN_A2B + self.loss_cycle_ABA
 
-            # Error G_B
-            self.error_G_B = (
-                self.loss_GAN_B2A
-                # + self.loss_identity_B
-                # + self.loss_cycle_BAB
-            )
+            # Error G_B (removed: self.loss_identity_B)
+            self.error_G_B = self.loss_GAN_B2A + self.loss_cycle_BAB
 
             # Average error on G_A
             self.cum_error_G_A += self.error_G_A
@@ -490,19 +541,11 @@ class RunCycleManager:
         # Validate model on the validation data - do not update weights
         else:
 
-            # Error G_A
-            self.v__error_G_A = (
-                self.loss_GAN_A2B
-                # + self.loss_identity_A
-                # + self.loss_cycle_ABA
-            )
+            # Error G_A (removed: self.loss_identity_A)
+            self.v__error_G_A = self.loss_GAN_A2B + self.loss_cycle_ABA
 
-            # Error G_B
-            self.v__error_G_B = (
-                self.loss_GAN_B2A
-                # + self.loss_identity_B
-                # + self.loss_cycle_BAB
-            )
+            # Error G_B (removed: self.loss_identity_B)
+            self.v__error_G_B = self.loss_GAN_B2A + self.loss_cycle_BAB
 
             # Cumulative and average error of G_A
             self.v__cum_error_G_A += self.v__error_G_A
@@ -514,18 +557,7 @@ class RunCycleManager:
 
         pass
 
-    def __update_discriminators(self, i, run) -> None:
-
-        """ Add Gaussian noise to discriminator input A and B """
-
-        mean = 0.0
-        std = 1.0
-
-        noise_A = (torch.randn(self.real_image_A.size()) * std + mean).to(run.device)
-        noise_B = (torch.randn(self.real_image_B.size()) * std + mean).to(run.device)
-
-        self.real_image_A_noise = self.real_image_A + noise_A
-        self.real_image_B_noise = self.real_image_B + noise_B
+    def __update_discriminators(self, i) -> None:
 
         """" Update discriminator A """
 
@@ -537,12 +569,12 @@ class RunCycleManager:
 
         # Real A image loss
         self.real_output_A = self.net_D_A(self.real_image_A_noise)
-        self.error_D_real_A = self.adversarial_loss(self.real_output_A, self.real_label)
+        self.error_D_real_A = self.adversarial_loss(self.real_output_A, self.real_smooth_label)
 
         # Fake image A loss
-        self.fake_image_A = self.fake_A_buffer.push_and_pop(self.fake_image_A)
-        self.fake_output_A = self.net_D_A(self.fake_image_A.detach())
-        self.error_D_fake_A = self.adversarial_loss(self.fake_output_A, self.fake_label)
+        self.fake_image_A_noise = self.fake_A_buffer.push_and_pop(self.fake_image_A_noise)
+        self.fake_output_A = self.net_D_A(self.fake_image_A_noise.detach())
+        self.error_D_fake_A = self.adversarial_loss(self.fake_output_A, self.fake_smooth_label)
 
         # Combined loss and calculate gradients
         self.error_D_A = (self.error_D_real_A + self.error_D_fake_A) / 2
@@ -579,12 +611,12 @@ class RunCycleManager:
 
         # Real B image loss
         self.real_output_B = self.net_D_B(self.real_image_B_noise)
-        self.error_D_real_B = self.adversarial_loss(self.real_output_B, self.real_label)
+        self.error_D_real_B = self.adversarial_loss(self.real_output_B, self.real_smooth_label)
 
         # Fake image B loss
-        self.fake_image_B = self.fake_B_buffer.push_and_pop(self.fake_image_B)
-        self.fake_output_B = self.net_D_B(self.fake_image_B.detach())
-        self.error_D_fake_B = self.adversarial_loss(self.fake_output_B, self.fake_label)
+        self.fake_image_B_noise = self.fake_B_buffer.push_and_pop(self.fake_image_B_noise)
+        self.fake_output_B = self.net_D_B(self.fake_image_B_noise.detach())
+        self.error_D_fake_B = self.adversarial_loss(self.fake_output_B, self.fake_smooth_label)
 
         # Combined loss and calculate gradients
         self.error_D_B = (self.error_D_real_B + self.error_D_fake_B) / 2
@@ -678,7 +710,7 @@ class RunCycleManager:
 
         pass
 
-    def __save_realtime_output(self) -> None:
+    def __save_realtime_output(self, i) -> None:
 
         """ (5) Save all generated network output and """
 
@@ -692,6 +724,8 @@ class RunCycleManager:
                 filepath_real_B_noise,
                 filepath_fake_A,
                 filepath_fake_B,
+                filepath_fake_A_noise,
+                filepath_fake_B_noise,
                 # filepath_f_or_A,
                 # filepath_f_or_B,
             ) = (
@@ -701,6 +735,8 @@ class RunCycleManager:
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/real_sample_noise.png",
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/fake_sample.png",
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/fake_sample.png",
+                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/fake_sample_noise.png",
+                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/fake_sample_noise.png",
                 # f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/fake_original.png",
                 # f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/fake_original.png",
             )
@@ -715,6 +751,8 @@ class RunCycleManager:
                 filepath_real_B_noise,
                 filepath_fake_A,
                 filepath_fake_B,
+                filepath_fake_A_noise,
+                filepath_fake_B_noise,
                 # filepath_f_or_A,
                 # filepath_f_or_B,
             ) = (
@@ -724,6 +762,8 @@ class RunCycleManager:
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__real_sample_noise.png",
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__fake_sample.png",
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__fake_sample.png",
+                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__fake_sample_noise.png",
+                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__fake_sample_noise.png",
                 # f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__fake_original.png",
                 # f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__fake_original.png",
             )
@@ -739,6 +779,10 @@ class RunCycleManager:
         # Save the generated (fake) image
         vutils.save_image(self.fake_image_A.detach(), filepath_fake_A, normalize=True)
         vutils.save_image(self.fake_image_B.detach(), filepath_fake_B, normalize=True)
+
+        # Save the generated (fake) image
+        vutils.save_image(self.fake_image_A_noise.detach(), filepath_fake_A_noise, normalize=True)
+        vutils.save_image(self.fake_image_B_noise.detach(), filepath_fake_B_noise, normalize=True)
 
         # # Save the generated (fake) original images
         # vutils.save_image(self.fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
@@ -788,7 +832,7 @@ class RunCycleManager:
 
         if self.batch_is_validation == True:
             self.progress_bar.set_description(
-                f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}] [skip_dis={self.skip_discriminator}] [val={self.batch_is_validation}]  ||  "
+                f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}] [skip_dis={self.skip_discriminator}] [val={self.batch_is_validation}] [nf={self.noise_factor:.3f}]  ||  "
                 f"v__avg_error_D_A: {self.v__avg_error_D_A:.3f} ; "
                 f"v__avg_error_D_B: {self.v__avg_error_D_B:.3f}  ||  "
                 f"v__avg_error_G_A2B: {self.v__avg_error_G_A:.3f} ; "
@@ -796,7 +840,7 @@ class RunCycleManager:
             )
         else:
             self.progress_bar.set_description(
-                f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}] [skip_dis={self.skip_discriminator}] [val={self.batch_is_validation}]  ||  "
+                f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}] [skip_dis={self.skip_discriminator}] [val={self.batch_is_validation}] [nf={self.noise_factor:.3f}]  ||  "
                 f"avg_error_D_A: {self.avg_error_D_A:.3f} ; "
                 f"avg_error_D_B: {self.avg_error_D_B:.3f}  ||  "
                 f"avg_error_G_A2B: {self.avg_error_G_A:.3f} ; "
@@ -824,6 +868,8 @@ class RunCycleManager:
             filepath_real_B_noise,
             filepath_fake_A,
             filepath_fake_B,
+            filepath_fake_A_noise,
+            filepath_fake_B_noise,
             # filepath_f_or_A,
             # filepath_f_or_B,
         ) = (
@@ -831,8 +877,10 @@ class RunCycleManager:
             f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___real_sample.png",
             f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___real_sample_noise.png",
             f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___real_sample_noise.png",
-            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___fake_sample_MSE.png",
-            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___fake_sample_MSE.png",
+            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___fake_sample.png",
+            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___fake_sample.png",
+            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___fake_sample_noise.png",
+            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___fake_sample_noise.png",
             # f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___fake_original_MSE{self.avg_mse_loss_A:.3f}.png",
             # f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___fake_original_MSE{self.avg_mse_loss_B:.3f}.png",
         )
@@ -848,6 +896,10 @@ class RunCycleManager:
         # Save the generated (fake) image
         vutils.save_image(self.fake_image_A.detach(), filepath_fake_A, normalize=True)
         vutils.save_image(self.fake_image_B.detach(), filepath_fake_B, normalize=True)
+
+        # Save the generated (fake) image
+        vutils.save_image(self.fake_image_A_noise.detach(), filepath_fake_A_noise, normalize=True)
+        vutils.save_image(self.fake_image_B_noise.detach(), filepath_fake_B_noise, normalize=True)
 
         # # Save the generated (fake) original images
         # vutils.save_image(self.fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
@@ -899,20 +951,20 @@ class RunCycleManager:
 
         """ Plot losses """
 
-        if i % self.SHOW_IMAGE_FREQ  == 0 :
+        if i % self.SHOW_IMAGE_FREQ == 0:
             self.per_batch_figure, self.per_batch_axes = plt.subplots(2)
 
-            self.per_batch_axes[0].set_title(f"Generator A and Discriminator A loss during epoch {epoch}")
-            self.per_batch_axes[1].set_title(f"Generator B and Discriminator B loss during epoch {epoch}")
+            self.per_batch_axes[0].set_title(f"Generator A and Generator B loss during epoch {epoch}")
+            self.per_batch_axes[1].set_title(f"Discriminator A and Discriminator B loss during epoch {epoch}")
 
-            self.per_batch_axes[0].set(xlabel="Batch", ylabel="Loss")
-            self.per_batch_axes[1].set(xlabel="Batch", ylabel="Loss")
+            self.per_batch_axes[0].set(xlabel="Batch", ylabel="G Loss")
+            self.per_batch_axes[1].set(xlabel="Batch", ylabel="L Loss")
 
-            self.per_batch_axes[0].plot(self.batch_losses_G_A, label="G_A")
-            self.per_batch_axes[0].plot(self.batch_losses_D_A, label="D_A")
+            self.per_batch_axes[0].plot(self.batch_losses_G_A, label="G_A", color="tab:blue")
+            self.per_batch_axes[0].plot(self.batch_losses_G_B, label="G_B", color="tab:red")
 
-            self.per_batch_axes[1].plot(self.batch_losses_G_B, label="G_B")
-            self.per_batch_axes[1].plot(self.batch_losses_D_B, label="D_B")
+            self.per_batch_axes[1].plot(self.batch_losses_D_A, label="D_A", color="tab:green")
+            self.per_batch_axes[1].plot(self.batch_losses_D_B, label="D_B", color="tab:orange")
 
             self.per_batch_axes[0].legend()
             self.per_batch_axes[1].legend()
@@ -929,26 +981,26 @@ class RunCycleManager:
 
         """ Append the current average losses to the arrays containing the network losses """
 
-        self.losses_G_A.append(self.avg_error_G_A)
-        self.losses_G_B.append(self.avg_error_G_B)
-        self.losses_D_A.append(self.avg_error_D_A)
-        self.losses_D_B.append(self.avg_error_D_B)
+        self.losses_G_A.append(self.avg_error_G_A.cpu().detach().numpy())
+        self.losses_G_B.append(self.avg_error_G_B.cpu().detach().numpy())
+        self.losses_D_A.append(self.avg_error_D_A.cpu().detach().numpy())
+        self.losses_D_B.append(self.avg_error_D_B.cpu().detach().numpy())
 
         """ Plot losses """
 
         self.per_epoch_figure, self.per_epoch_axes = plt.subplots(2)
 
-        self.per_epoch_axes[0].set_title(f"Generator A and Discriminator A loss during training")
-        self.per_epoch_axes[1].set_title(f"Generator B and Discriminator B loss during training")
+        self.per_epoch_axes[0].set_title(f"Generator A and Generator B avg. loss during training")
+        self.per_epoch_axes[1].set_title(f"Discriminator A and Discriminator B avg. loss during training")
 
         self.per_epoch_axes[0].set(xlabel="Iteration", ylabel="Loss")
         self.per_epoch_axes[1].set(xlabel="Iteration", ylabel="Loss")
 
-        self.per_epoch_axes[0].plot(self.losses_G_A, label="G_A")
-        self.per_epoch_axes[0].plot(self.losses_D_A, label="D_A")
+        self.per_epoch_axes[0].plot(self.losses_G_A, label="G_A", color="tab:blue")
+        self.per_epoch_axes[0].plot(self.losses_G_B, label="G_B", color="tab:red")
 
-        self.per_epoch_axes[1].plot(self.losses_G_B, label="G_B")
-        self.per_epoch_axes[1].plot(self.losses_D_B, label="D_B")
+        self.per_epoch_axes[1].plot(self.losses_D_A, label="D_A", color="tab:green")
+        self.per_epoch_axes[1].plot(self.losses_D_B, label="D_B", color="tab:orange")
 
         self.per_epoch_axes[0].legend()
         self.per_epoch_axes[1].legend()
