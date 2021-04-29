@@ -16,6 +16,7 @@ import torchvision.transforms as transforms
 from torch.utils.data import Dataset
 
 from PIL import Image
+from torchvision.transforms.transforms import CenterCrop
 
 
 class Left2RightDataset(Dataset):
@@ -44,8 +45,8 @@ class Left2RightDataset(Dataset):
 
         self.prefix = f"- [L2R][{name}][{mode}]"
 
-        print(f"{self.prefix} run_checks:", check_channels)
-        print(f"{self.prefix} transforms:", transforms, "\n")
+        # print(f"{self.prefix} run_checks:", check_channels)
+        # print(f"{self.prefix} transforms:", transforms, "\n")
 
         self.stereo_l = self.get_images(
             path=os.path.join(root, group, name, f"{mode}/left") + "/*.*",
@@ -149,8 +150,8 @@ class Stereo2DisparityDataset(Dataset):
 
         self.prefix = f"- [S2D][{name}][{mode}]"
 
-        print(f"{self.prefix} run_checks:", check_channels)
-        print(f"{self.prefix} transforms:", transforms, "\n")
+        # print(f"{self.prefix} run_checks:", check_channels)
+        # print(f"{self.prefix} transforms:", transforms, "\n")
 
         self.stereo_l = self.get_images(
             path=os.path.join(root, group, name, f"{mode}/A/left") + "/*.*",
@@ -268,7 +269,7 @@ class MyDataLoader:
                 group=dataset_group,
                 mode=dataset_mode,
                 name=dataset_name,
-                tFsforms=self.__get_transforms(channels, image_size),
+                transforms=self.__get_transforms(channels, image_size),
                 channels=channels,
                 check_channels=check_channels,
             )
@@ -285,14 +286,24 @@ class MyDataLoader:
             raise Exception(f"Can not get dataset for given: {summary}")
 
     @staticmethod
-    def __get_transforms(channels, image_size, crop_ratio: float = 1.0) -> transforms:
+    def __get_transforms(channels, image_size) -> transforms:
 
-        RANDOM_CROP = (int(image_size[0] * crop_ratio), int(image_size[1] * crop_ratio))
+        h, w = image_size[0], image_size[1]
+
+        if h < w:
+            square_size = (h, h)
+        else:
+            square_size = (w, w)
+
+        if square_size[0] % 4 == 0:
+            print("- Square image size is divisable by 4, ok. Continue")
+        else:
+            raise Exception(f"The square_size (image_size) is not divisable by 4! See: {square_size}")
 
         transforms_1d: transforms = transforms.Compose(
             [
                 transforms.Resize(size=image_size, interpolation=Image.BICUBIC),
-                # transforms.RandomCrop(size=RANDOM_CROP),
+                transforms.CenterCrop(square_size),
                 transforms.Grayscale(num_output_channels=1),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=(0.5), std=(0.5)),
@@ -302,7 +313,7 @@ class MyDataLoader:
         transforms_3d: transforms = transforms.Compose(
             [
                 transforms.Resize(size=image_size, interpolation=Image.BICUBIC),
-                # transforms.RandomCrop(size=RANDOM_CROP),
+                transforms.CenterCrop(square_size),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
             ]

@@ -1,22 +1,24 @@
 #!/usr/bin/env python
 from __future__ import absolute_import, division, print_function
 
+#%matplotlib inline
+
 import os
 import csv
 import sys
-import time
 import random
 import numpy as np
+import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
 import torch.utils.data
 import torch.utils.data.distributed
-from torchvision.transforms.transforms import Grayscale
 import torchvision.utils as vutils
 import torchvision.transforms as transforms
 
+from torch.utils.data.dataloader import DataLoader
 
 from PIL import Image
 from tqdm import tqdm
@@ -24,23 +26,16 @@ from datetime import datetime
 from itertools import product
 from collections import namedtuple
 from collections import OrderedDict
-from skimage.metrics import structural_similarity as ssim
 
-from torch.utils.data.dataloader import DataLoader
-from synthesis.Synthesis import Synthesis
-
-from utils.functions.initialize_weights import initialize_weights
 
 from utils.classes.DecayLR import DecayLR
+from utils.classes.dataloaders import MyDataLoader
 from utils.classes.ReplayBuffer import ReplayBuffer
-
-from utils.models.cycle.Discriminator import Discriminator
 from utils.models.cycle.Generators import Generator
+from utils.models.cycle.Discriminator import Discriminator
 
-from dataloaders import MyDataLoader
 
-from test import DIR_WEIGHTS, test
-
+# Clear the terminal
 os.system("cls")
 
 
@@ -77,6 +72,8 @@ class RunCycleManager:
         dir_weights: str = "./weights",
         save_epoch_freq: int = 1,
         show_image_freq: int = 5,
+        show_graph_freq: int = 10,
+        validation_percentage: float = 0.0,
     ) -> None:
 
         """ [ Insert documentation ] """
@@ -86,16 +83,17 @@ class RunCycleManager:
         self.dataset = dataset
         self.dataset_group = dataset.dataset_group
         self.channels = channels
+        self.validation_percentage = validation_percentage
 
         # Configuration
         self.DIR_DATASET = f"{dir_dataset}/{self.dataset_group}"
         self.DIR_OUTPUTS = f"{dir_outputs}/{self.dataset_group}"
         self.DIR_RESULTS = f"{dir_results}/{self.dataset_group}"
         self.DIR_WEIGHTS = f"{dir_weights}/{self.dataset_group}"
-        self.RUN_PATH = None
-
-        self.SAVE_EPOCH_FREQ = save_epoch_freq
         self.SHOW_IMAGE_FREQ = show_image_freq
+        self.SHOW_GRAPH_FREQ = show_graph_freq
+        self.SAVE_EPOCH_FREQ = save_epoch_freq
+        self.RUN_PATH = None
 
         # Variables
         self.run = Run()
@@ -107,508 +105,170 @@ class RunCycleManager:
         self.loader = None
         self.tb = None
 
-        # MSE losses
-        self.avg_mse_loss_A, self.avg_mse_loss_B, self.avg_mse_loss_f_or_A, self.avg_mse_loss_f_or_B = 0, 0, 0, 0
-        self.cum_mse_loss_A, self.cum_mse_loss_B, self.cum_mse_loss_f_or_A, self.cum_mse_loss_f_or_B = 0, 0, 0, 0
-
         # Runs
-        self.runs = self.build_cycle(parameters)
+        self.runs = self.__build_cycle(parameters)
 
     def start_cycle(self) -> None:
 
         # Iterate over every run, based on the configurated params
         for run in self.runs:
 
-            self.start_run(run, self.dataset)
-
-            pass
-
-    def start_run(self, run, dataset) -> None:
-
-        # Clear occupied CUDA memory
-        torch.cuda.empty_cache()
-
-        # Set a random seed for reproducibility
-        random.seed(run.manualSeed)
-        torch.manual_seed(run.manualSeed)
-
-        self.RUN_PATH = self.get_run_path(run, dataset.name, self.channels)
-
-        # Make required directories for storing the training output
-        self.makedirs(path=os.path.join(self.DIR_WEIGHTS, self.RUN_PATH), dir="weights")
-        self.makedirs(path=os.path.join(self.DIR_OUTPUTS, self.RUN_PATH), dir="outputs")
-
-        # [TO-DO] Also store a copy of the used PARAMETERS as a config.yaml in the output- and weight dir
-
-        # Create csv for the logs file of this run
-        with open(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/logs.csv", "w", newline="") as file:
-            writer = csv.writer(file)
-            writer.writerow([
-                "Epoch",
-                "Loss D(A)", 
-                "Loss D(B)", 
-                "Loss identity A",
-                "Loss identity B",
-                "Loss GAN(A2B)", 
-                "Loss GAN(B2A)", 
-                "Loss Cycle ABA",
-                "Loss Cycle BAB",
-                "G(A2B)_MSE(avg)", 
-                "G(B2A)_MSE(avg)", 
-                "G(A2B2A)_MSE(avg)",
-                "G(B2A2B)_MSE(avg)",
-            ])
-
-
-        # f"L_G_ID: {(loss_identity_A + loss_identity_B).item():.2f} "
-        # f"L_G_GAN: {(loss_GAN_A2B + loss_GAN_B2A).item():.2f} "
-        # f"L_G_CYCLE: {(loss_cycle_ABA + loss_cycle_BAB).item():.2f} "
-        
-        # Create Generator and Discriminator models
-        self.net_G_A2B = Generator(in_channels=self.channels, out_channels=self.channels).to(run.device)
-        self.net_G_B2A = Generator(in_channels=self.channels, out_channels=self.channels).to(run.device)
-        self.net_D_A = Discriminator(in_channels=self.channels, out_channels=self.channels).to(run.device)
-        self.net_D_B = Discriminator(in_channels=self.channels, out_channels=self.channels).to(run.device)
-
-        # Apply weights
-        self.net_G_A2B.apply(initialize_weights)
-        self.net_G_A2B.apply(initialize_weights)
-        self.net_D_A.apply(initialize_weights)
-        self.net_D_B.apply(initialize_weights)
-
-        # define loss function (adversarial_loss)
-        self.cycle_loss = torch.nn.L1Loss().to(run.device)
-        self.identity_loss = torch.nn.L1Loss().to(run.device)
-        self.adversarial_loss = torch.nn.MSELoss().to(run.device)
-
-        # Optimizers
-        self.optimizer_G_A2B = torch.optim.Adam(self.net_G_A2B.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
-        self.optimizer_G_B2A = torch.optim.Adam(self.net_G_A2B.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
-        self.optimizer_D_A = torch.optim.Adam(self.net_D_A.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
-        self.optimizer_D_B = torch.optim.Adam(self.net_D_B.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
-
-        # Learning rates
-        self.lr_lambda = DecayLR(run.num_epochs, 0, run.decay_epochs).step
-        self.lr_scheduler_G_A2B = torch.optim.lr_scheduler.LambdaLR(self.optimizer_G_A2B, lr_lambda=self.lr_lambda)
-        self.lr_scheduler_G_B2A = torch.optim.lr_scheduler.LambdaLR(self.optimizer_G_B2A, lr_lambda=self.lr_lambda)
-        self.lr_scheduler_D_A = torch.optim.lr_scheduler.LambdaLR(self.optimizer_D_A, lr_lambda=self.lr_lambda)
-        self.lr_scheduler_D_B = torch.optim.lr_scheduler.LambdaLR(self.optimizer_D_B, lr_lambda=self.lr_lambda)
-
-        # Buffers
-        self.fake_A_buffer = ReplayBuffer()
-        self.fake_B_buffer = ReplayBuffer()
-
-        # Dataloader
-        loader = DataLoader(
-            dataset=dataset, batch_size=run.batch_size, num_workers=run.num_workers, shuffle=run.shuffle
-        )
-
-        # Track the start of the run
-        self.begin_run(run, loader)
-
-        # Iterate through all the epochs
-        for epoch in range(0, run.num_epochs):
-
-            # Track the start of the epoch
-            self.begin_epoch()
-
-            # Create progress bar
-            progress_bar = tqdm(enumerate(loader), total=len(loader))
-
-            # Iterate over the data loader
-            for i, data in progress_bar:
-
-                """ Private functions that regard the training of a GAN during a single run"""
-
-                def __read_data() -> None:
+            # Clear occupied CUDA memory
+            torch.cuda.empty_cache()
 
-                    # Get image A and image B
-                    if self.dataset_group == "l2r":
-                        self.real_image_A = data["left"].to(run.device)
-                        self.real_image_B = data["right"].to(run.device)
+            # Set a random seed for reproducibility
+            random.seed(run.manualSeed)
+            torch.manual_seed(run.manualSeed)
 
-                    elif self.dataset_group == "s2d":
-                        real_image_A_left = data["A_left"].to(run.device)
-                        real_image_A_right = data["A_right"].to(run.device)
-                        real_image_B = data["B"].to(run.device)
+            self.RUN_PATH = self.get_run_path(run, self.dataset.name, self.channels)
 
-                        # Concatenate left- and right view into one stereo image
-                        self.real_image_A = torch.cat((real_image_A_left, real_image_A_right), dim=-1)
-                        self.real_image_B = real_image_B
+            # Make required directories for storing the training output
+            self.makedirs(path=os.path.join(self.DIR_WEIGHTS, self.RUN_PATH), dir="weights")
+            self.makedirs(path=os.path.join(self.DIR_OUTPUTS, self.RUN_PATH), dir="outputs")
 
-                    else:
-                        raise Exception(f"Can not read input images, given group '{self.dataset_group}' is incorrect.")
+            # Create a per-epoch csv log file
+            self.__create_per_epoch_csv_logs()
 
-                    # Real data label is 1, fake data label is 0.
-                    self.real_label = torch.full((run.batch_size, 1), 1, device=run.device, dtype=torch.float32)
-                    self.fake_label = torch.full((run.batch_size, 1), 0, device=run.device, dtype=torch.float32)
+            # Create Generator and Discriminator models
+            self.net_G_A2B = Generator(in_channels=self.channels, out_channels=self.channels).to(run.device)
+            self.net_G_B2A = Generator(in_channels=self.channels, out_channels=self.channels).to(run.device)
+            self.net_D_A = Discriminator(in_channels=self.channels, out_channels=self.channels).to(run.device)
+            self.net_D_B = Discriminator(in_channels=self.channels, out_channels=self.channels).to(run.device)
 
-                    pass
+            # Apply weights
+            self.net_G_A2B.apply(self.__initialize_weights)
+            self.net_G_B2A.apply(self.__initialize_weights)
+            self.net_D_A.apply(self.__initialize_weights)
+            self.net_D_B.apply(self.__initialize_weights)
 
-                def __update_generators() -> None:
+            # define loss functions
+            self.cycle_loss = torch.nn.L1Loss().to(run.device)
+            self.identity_loss = torch.nn.L1Loss().to(run.device)
+            self.adversarial_loss = torch.nn.MSELoss().to(run.device)
 
-                    """ Update Generator networks: A2B and B2A """
+            # Optimizers
+            self.optimizer_G_A2B = torch.optim.Adam(
+                self.net_G_A2B.parameters(), lr=run.learning_rate, betas=(0.5, 0.999)
+            )
+            self.optimizer_G_B2A = torch.optim.Adam(
+                self.net_G_B2A.parameters(), lr=run.learning_rate, betas=(0.5, 0.999)
+            )
+            self.optimizer_D_A = torch.optim.Adam(self.net_D_A.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
+            self.optimizer_D_B = torch.optim.Adam(self.net_D_B.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
 
-                    # Zero the gradients
-                    self.optimizer_G_A2B.zero_grad()
-                    self.optimizer_G_B2A.zero_grad()
+            # Learning rates
+            self.lr_lambda = DecayLR(run.num_epochs, 0, run.decay_epochs).step
+            self.lr_scheduler_G_A2B = torch.optim.lr_scheduler.LambdaLR(self.optimizer_G_A2B, lr_lambda=self.lr_lambda)
+            self.lr_scheduler_G_B2A = torch.optim.lr_scheduler.LambdaLR(self.optimizer_G_B2A, lr_lambda=self.lr_lambda)
+            self.lr_scheduler_D_A = torch.optim.lr_scheduler.LambdaLR(self.optimizer_D_A, lr_lambda=self.lr_lambda)
+            self.lr_scheduler_D_B = torch.optim.lr_scheduler.LambdaLR(self.optimizer_D_B, lr_lambda=self.lr_lambda)
 
-                    # Identity loss of B2A
-                    # G_B2A(A) should equal A if real A is fed
-                    self.identity_image_A = self.net_G_B2A(self.real_image_A)
-                    self.loss_identity_A = self.identity_loss(self.identity_image_A, self.real_image_A) * 5.0
+            # Buffers train
+            self.fake_A_buffer = ReplayBuffer()
+            self.fake_B_buffer = ReplayBuffer()
 
-                    # Identity loss of A2B
-                    # G_A2B(B) should equal B if real B is fed
-                    self.identity_image_B = self.net_G_A2B(self.real_image_B)
-                    self.loss_identity_B = self.identity_loss(self.identity_image_B, self.real_image_B) * 5.0
+            # Dataloader train set
+            self.loader = DataLoader(
+                dataset=self.dataset, batch_size=run.batch_size, num_workers=run.num_workers, shuffle=run.shuffle
+            )
 
-                    # GAN loss: D_A(G_A(A))
-                    self.fake_image_A = self.net_G_B2A(self.real_image_B)
-                    self.fake_output_A = self.net_D_A(self.fake_image_A)
-                    self.loss_GAN_B2A = self.adversarial_loss(self.fake_output_A, self.real_label)
+            # Keep track of the per-epoch losses
+            self.losses_G_A, self.losses_G_B = [], []
+            self.losses_D_A, self.losses_D_B = [], []
 
-                    # GAN loss: D_B(G_B(B))
-                    self.fake_image_B = self.net_G_A2B(self.real_image_A)
-                    self.fake_output_B = self.net_D_B(self.fake_image_B)
-                    self.loss_GAN_A2B = self.adversarial_loss(self.fake_output_B, self.real_label)
+            """ Iterate over the epochs in the run """
 
-                    # Cycle loss
-                    self.recovered_image_A = self.net_G_B2A(self.fake_image_B)
-                    self.loss_cycle_ABA = self.cycle_loss(self.recovered_image_A, self.real_image_A) * 10.0
+            # Iterate through all the epochs
+            for epoch in range(0, run.num_epochs):
 
-                    self.recovered_image_B = self.net_G_A2B(self.fake_image_A)
-                    self.loss_cycle_BAB = self.cycle_loss(self.recovered_image_B, self.real_image_B) * 10.0
+                # Keep track of the per-batch losses during one epoch
+                self.batch_losses_G_A, self.batch_losses_G_B = [], []
+                self.batch_losses_D_A, self.batch_losses_D_B = [], []
+                self.full_batch_losses_G_A, self.full_batch_losses_G_B = [], []
 
-                    # Combined loss and calculate gradients
-                    error_G = (
-                        self.loss_identity_A
-                        + self.loss_identity_B
-                        + self.loss_GAN_A2B
-                        + self.loss_GAN_B2A
-                        + self.loss_cycle_ABA
-                        + self.loss_cycle_BAB
-                    )
+                # Create a per-batch csv log file
+                self.__create_per_batch_csv_logs(epoch)
 
-                    # Calculate gradients for G_A and G_B
-                    error_G.backward()
+                # Set error variables at 0 at the begin of each epoch
+                self.__set_error_variables_to_zero()
 
-                    # Update the Generator networks
-                    self.optimizer_G_A2B.step()
-                    self.optimizer_G_B2A.step()
+                """ Iterate over training data using the progress bar """
 
-                    pass
+                # Create progress bar
+                self.progress_bar = tqdm(enumerate(self.loader), total=len(self.loader))
 
-                def __update_discriminators() -> None:
+                # Iterate over the data loader_train
+                for i, data in self.progress_bar:
 
-                    """ Update Discriminator networks A and B"""
+                    try:
 
-                    # Set D_A gradients to zero
-                    self.optimizer_D_A.zero_grad()
+                        """ Determine whether this batch is for training or validation """
 
-                    # Real A image loss
-                    real_output_A = self.net_D_A(self.real_image_A)
-                    error_D_real_A = self.adversarial_loss(real_output_A, self.real_label)
+                        self.batch_is_validation = self.__is_batch_validation(i)
 
-                    # Fake A image loss
-                    self.fake_image_A = self.fake_A_buffer.push_and_pop(self.fake_image_A)
-                    fake_output_A = self.net_D_A(self.fake_image_A.detach())
-                    error_D_fake_A = self.adversarial_loss(fake_output_A, self.fake_label)
+                        """ Call the functions to train the GAN """
 
-                    # Combined loss and calculate gradients
-                    self.error_D_A = (error_D_real_A + error_D_fake_A) / 2
+                        # Read data
+                        self.__read_data(run, data)
 
-                    # Calculate gradients for D_A
-                    self.error_D_A.backward()
+                        # Update generator networks
+                        self.__update_generators(i)
 
-                    # Update D_A weights
-                    self.optimizer_D_A.step()
+                        # Add noise to the discriminator input
+                        self.__add_discriminator_noise(epoch, run)
 
-                    # Set D_B gradients to zero
-                    self.optimizer_D_B.zero_grad()
+                        # Update discriminator networks
+                        self.__update_discriminators(i)
 
-                    # Real B image loss
-                    real_output_B = self.net_D_B(self.real_image_B)
-                    error_D_real_B = self.adversarial_loss(real_output_B, self.real_label)
+                        # # Regerate original input
+                        # __regenerate_inputs()
 
-                    # Fake B image loss
-                    self.fake_image_B = self.fake_B_buffer.push_and_pop(self.fake_image_B)
-                    fake_output_B = self.net_D_B(self.fake_image_B.detach())
-                    error_D_fake_B = self.adversarial_loss(fake_output_B, self.fake_label)
+                        # # Re-generate "original" input image by running both A2B and B2A through, respectively, B2A and A2B
+                        # __update_losses()
 
-                    # Combined loss and calculate gradients
-                    self.error_D_B = (error_D_real_B + error_D_fake_B) / 2
+                        # Save the real-time output images for every {SHOW_IMG_FREQ} images
+                        self.__save_realtime_output(i)
 
-                    # Calculate gradients for D_B
-                    self.error_D_B.backward()
+                        # Save per-epoch logs
+                        self.__save_per_epoch_logs(epoch)
 
-                    # Update D_B weights
-                    self.optimizer_D_B.step()
+                        # Save the per-batch losses in a plot
+                        self.__save_plot_per_batch(i, epoch)
 
-                    pass
+                        # Print a progress bar in the terminal
+                        self.__print_progress(i, epoch, run)
 
-                def __regenerate_inputs() -> None:
+                    except Exception as e:
 
-                    """ Network losses and input data regeneration """
+                        print(e)
 
-                    """
+                        pass
 
-                        Note:
+                """ Call the end-of-epoch functions """
 
-                        # This is the identity_image_B, perhaps copy the variable itself -> to-do
-                        _fake_image_A = self.net_G_A2B(self.real_image_B)
+                # Update learning rates after each epoch
+                self.__update_learning_rate()
 
-                        # This is the identity_image_A, perhaps copy the variable itself -> to-do
-                        _fake_image_B = self.net_G_B2A(self.real_image_A)
+                # Save the output at the end of each epoch
+                self.__save_end_epoch_output(epoch)
 
-                    """
+                # Save some logs at the end of each epoch
+                self.__save_end_epoch_logs(epoch)
 
-                    # Generate original image from generated (fake) output. So run, respectively, fake A & B image through B2A & A2B
-                    self.fake_original_image_A = self.net_G_B2A(self.identity_image_A)
-                    self.fake_original_image_B = self.net_G_A2B(self.identity_image_B)
+                # Save the losses in a plot of each epoch
+                self.__save_plot_per_epoch(epoch)
 
-                    # Convert to usable images
-                    self.fake_image_A = 0.5 * (self.fake_image_A.data + 1.0)
-                    self.fake_image_B = 0.5 * (self.fake_image_B.data + 1.0)
+            """ Save final model """
 
-                    # Convert to usable images
-                    self.fake_original_image_A = 0.5 * (self.fake_original_image_A.data + 1.0)
-                    self.fake_original_image_B = 0.5 * (self.fake_original_image_B.data + 1.0)
-
-                    pass
-
-                def __update_losses() -> None:
-
-                    """ Calculate a cumulative MSE loss and  """
-
-                    # Initiate a mean square error (MSE) loss function
-                    mse_loss = nn.MSELoss()
-
-                    # Calculate the mean square error (MSE) loss
-                    mse_loss_A = mse_loss(self.fake_image_B, self.real_image_A)
-                    mse_loss_B = mse_loss(self.fake_image_A, self.real_image_B)
-
-                    # Calculate the sum of all mean square error (MSE) losses
-                    self.cum_mse_loss_A += mse_loss_A
-                    self.cum_mse_loss_B += mse_loss_B
-
-                    # Calculate the average mean square error (MSE) loss
-                    self.avg_mse_loss_A = self.cum_mse_loss_A / (i + 1)
-                    self.avg_mse_loss_B = self.cum_mse_loss_B / (i + 1)
-
-                    """ Calculate losses for the generated (fake) original images """
-
-                    # Calculate the mean square error (MSE) for the generated (fake) originals A and B
-                    self.mse_loss_f_or_A = mse_loss(self.fake_original_image_A, self.real_image_A)
-                    self.mse_loss_f_or_B = mse_loss(self.fake_original_image_B, self.real_image_B)
-
-                    # Calculate the average mean square error (MSE) for the fake originals A and B
-                    self.cum_mse_loss_f_or_A += self.mse_loss_f_or_A
-                    self.cum_mse_loss_f_or_B += self.mse_loss_f_or_B
-
-                    # Calculate the average mean square error (MSE) for the fake originals A and B
-                    self.avg_mse_loss_f_or_A = self.cum_mse_loss_f_or_A / (i + 1)
-                    self.avg_mse_loss_f_or_B = self.cum_mse_loss_f_or_B / (i + 1)
-
-                    pass
-
-                def __save_realtime_output() -> None:
-
-                    """ (5) Save all generated network output and """
-
-                    if i % self.SHOW_IMAGE_FREQ == 0:
-
-                        # Filepath and filename for the real-time output images
-                        (
-                            filepath_real_A,
-                            filepath_real_B,
-                            filepath_fake_A,
-                            filepath_fake_B,
-                            filepath_f_or_A,
-                            filepath_f_or_B,
-                        ) = (
-                            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/real_sample.png",
-                            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/real_sample.png",
-                            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/fake_sample.png",
-                            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/fake_sample.png",
-                            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/fake_original.png",
-                            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/fake_original.png",
-                        )
-
-                        # Save real input images
-                        vutils.save_image(self.real_image_A, filepath_real_A, normalize=True)
-                        vutils.save_image(self.real_image_B, filepath_real_B, normalize=True)
-
-                        # Save the generated (fake) image
-                        vutils.save_image(self.fake_image_A.detach(), filepath_fake_A, normalize=True)
-                        vutils.save_image(self.fake_image_B.detach(), filepath_fake_B, normalize=True)
-
-                        # Save the generated (fake) original images
-                        vutils.save_image(self.fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
-                        vutils.save_image(self.fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
-
-                    pass
-
-                def __print_progress() -> None:
-
-                    """ 
-                        
-                        # L_D(A)                = Loss discriminator A
-                        # L_D(B)                = Loss discriminator B
-                        # L_G(A2B)              = Loss generator A2B
-                        # L_G(B2A)              = Loss generator B2A
-                        # L_G_ID                = Combined oentity loss generators A2B + B2A
-                        # L_G_GAN               = Combined GAN loss generators A2B + B2A
-                        # L_G_CYCLE             = Combined cycle consistency loss Generators A2B + B2A
-                        # G(A2B)_MSE(avg)       = Mean square error (MSE) loss over the generated output B vs. the real image A
-                        # G(B2A)_MSE(avg)       = Mean square error (MSE) loss over the generated output A vs. the real image B
-                        # G(A2B2A)_MSE(avg)     = Average mean square error (MSE) loss over the generated original image A vs. the real image A
-                        # G(B2A2B)_MSE(avg)     = Average mean square error (MSE) loss over the generated original image B vs. the real image B
-
-                    """
-
-                    progress_bar.set_description(
-                        f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(loader)}] "
-                        # f"L_D(A): {error_D_A.item():.2f} "
-                        # f"L_D(B): {error_D_B.item():.2f} | "
-                        f"L_D(A+B): {((self.error_D_A + self.error_D_B) / 2).item():.3f} | "
-                        f"L_G(A2B): {self.loss_GAN_A2B.item():.3f} "
-                        f"L_G(B2A): {self.loss_GAN_B2A.item():.3f} | "
-                        # f"L_G_ID: {(loss_identity_A + loss_identity_B).item():.2f} "
-                        # f"L_G_GAN: {(loss_GAN_A2B + loss_GAN_B2A).item():.2f} "
-                        # f"L_G_CYCLE: {(loss_cycle_ABA + loss_cycle_BAB).item():.2f} "
-                        f"G(A2B)_MSE(avg): {(self.avg_mse_loss_A).item():.3f} "
-                        f"G(B2A)_MSE(avg): {(self.avg_mse_loss_B).item():.3f} | "
-                        f"G(A2B2A)_MSE(avg): {(self.avg_mse_loss_f_or_A).item():.3f} "
-                        f"G(B2A2B)_MSE(avg): {(self.avg_mse_loss_f_or_B).item():.3f} "
-                    )
-
-                    pass
-
-                """ Call the functions to train the GAN """
-                
-                # Read data
-                __read_data()
-
-                # Update generator networks
-                __update_generators()
-
-                # Update discriminator networks
-                __update_discriminators()
-
-                # Regerate original input
-                __regenerate_inputs()
-
-                # Re-generate "original" input image by running both A2B and B2A through, respectively, B2A and A2B
-                __update_losses()
-
-                # Save the real-time output images for every {SHOW_IMG_FREQ} images
-                __save_realtime_output()
-
-                # Print a progress bar in the terminal
-                __print_progress()
-
-            """ Private functions that regard the training of a GAN at the end of an epoch """
-
-            def __update_learning_rate() -> None:
-
-                self.lr_scheduler_G_A2B.step()
-                self.lr_scheduler_G_B2A.step()
-                self.lr_scheduler_D_A.step()
-                self.lr_scheduler_D_B.step()
-
-            def __save_end_epoch_output() -> None:
-
-                # Filepath and filename for the per-epoch output images
-                (
-                    filepath_real_A,
-                    filepath_real_B,
-                    filepath_fake_A,
-                    filepath_fake_B,
-                    filepath_f_or_A,
-                    filepath_f_or_B,
-                ) = (
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___real_sample.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___real_sample.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___fake_sample_MSE.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___fake_sample_MSE.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___fake_original_MSE{self.avg_mse_loss_A:.3f}.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___fake_original_MSE{self.avg_mse_loss_B:.3f}.png",
-                )
-
-                # Save real input images
-                vutils.save_image(self.real_image_A, filepath_real_A, normalize=True)
-                vutils.save_image(self.real_image_B, filepath_real_B, normalize=True)
-
-                # Save the generated (fake) image
-                vutils.save_image(self.fake_image_A.detach(), filepath_fake_A, normalize=True)
-                vutils.save_image(self.fake_image_B.detach(), filepath_fake_B, normalize=True)
-
-                # Save the generated (fake) original images
-                vutils.save_image(self.fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
-                vutils.save_image(self.fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
-
-                # Check point dir
-                model_weights_dir = f"{self.DIR_WEIGHTS}/{self.RUN_PATH}"
-
-                # Check points, save weights after each epoch
-                torch.save(self.net_G_A2B.state_dict(), f"{model_weights_dir}/net_G_A2B/net_G_A2B_epoch_{epoch}.pth")
-                torch.save(self.net_G_B2A.state_dict(), f"{model_weights_dir}/net_G_B2A/net_G_B2A_epoch_{epoch}.pth")
-                torch.save(self.net_D_A.state_dict(), f"{model_weights_dir}/net_D_A/net_D_A_epoch_{epoch}.pth")
-                torch.save(self.net_D_B.state_dict(), f"{model_weights_dir}/net_D_B/net_D_B_epoch_{epoch}.pth")
-
-                pass
-
-                # Save the network weights at the end of the epoch
-
-            def __save_end_epoch_logs() -> None:
-                
-                with open(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/logs.csv", "w", newline="") as file:
-                    writer = csv.writer(file)
-                    writer.writerow([   
-                        epoch, 
-                        f"{self.error_D_A.item():.4f}",
-                        f"{self.error_D_B.item():.4f}",
-                        f"{self.loss_identity_A.item():.4f}",
-                        f"{self.loss_identity_B.item():.4f}",
-                        f"{self.loss_GAN_A2B.item():.4f}",
-                        f"{self.loss_GAN_B2A.item():.4f}",
-                        f"{self.loss_cycle_ABA.item():.4f}",
-                        f"{self.loss_cycle_BAB.item():.4f}",
-                        f"{(self.avg_mse_loss_A).item():.4f}",
-                        f"{(self.avg_mse_loss_B).item():.4f}",
-                        f"{(self.avg_mse_loss_f_or_A).item():.4f}",
-                        f"{(self.avg_mse_loss_f_or_B).item():.4f}",
-                    ])
-
-                pass
-                
-            """ Call the end-of-epoch functions """
-           
-            # Update learning rates after each epoch
-            __update_learning_rate()
-
-            # Save the output at the end of each epoch
-            __save_end_epoch_output()
-
-            # Save some logs at the end of each epoch
-            __save_end_epoch_logs()
-
-        """ Save final model """
-
-
-
-        # Save last check points, after every run
-        torch.save(self.net_G_A2B.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_G_A2B/net_G_A2B.pth")
-        torch.save(self.net_G_B2A.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_G_B2A/net_G_B2A.pth")
-        torch.save(self.net_D_A.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_D_A/net_D_A.pth")
-        torch.save(self.net_D_B.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_D_B/net_D_B.pth")
-
-        self.end_run()
+            # Save last check points, after every run
+            torch.save(self.net_G_A2B.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_G_A2B/net_G_A2B.pth")
+            torch.save(self.net_G_B2A.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_G_B2A/net_G_B2A.pth")
+            torch.save(self.net_D_A.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_D_A/net_D_A.pth")
+            torch.save(self.net_D_B.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_D_B/net_D_B.pth")
 
         pass
 
-    def build_cycle(self, parameters) -> list:
+    def __build_cycle(self, parameters) -> list:
 
         run = namedtuple("Run", parameters.keys())
 
@@ -619,145 +279,825 @@ class RunCycleManager:
 
         return self.runs
 
-    # Deprecated
-    def begin_run(self, run, loader) -> None:
+    """ [ Private functions ] Called once per batch """
 
-        """ [ Insert documentation ] """
+    def __initialize_weights(self, m):
 
-        self.run.start_time = time.time()
-        self.run.params = run
-        self.run.count += 1
+        """ Custom weights initialization called on net_G and net_D """
 
-        self.loader = loader
+        classname = m.__class__.__name__
 
-        # self.tb = SummaryWriter(comment=f"-{run}")
+        if classname.find("Conv") != -1:
+            torch.nn.init.normal_(m.weight, 0.0, 0.02)
 
-        # images, labels = next(iter(self.loader))
-        # grid = torchvision.utils.make_grid(images)
-
-        # self.tb.add_image("images", grid)
-        # self.tb.add_graph(self.net_G_A2B, images.to(run.device))
-        # self.tb.add_graph(self.net_G_A2B, images.to(run.device))
-        # self.tb.add_graph(self.net_D_A, images.to(run.device))
-        # self.tb.add_graph(self.net_D_B, images.to(run.device))
-
-    # Deprecated
-    def end_run(self) -> None:
-
-        """ [ Insert documentation ] """
-
-        # self.tb.close()
-        # self.epoch.count = 0
+        elif classname.find("BatchNorm") != -1:
+            torch.nn.init.normal_(m.weight, 1.0, 0.02)
+            torch.nn.init.zeros_(m.bias)
 
         pass
 
-    # Deprecated
-    def begin_epoch(self) -> None:
+    def __is_batch_validation(self, i) -> bool:
 
-        """ [ Insert documentation ] """
+        # Get the index from which the dataset is considered to be validation data
+        validation_at_index: int = int(len(self.loader) * (1 - self.validation_percentage)) - 1
 
-        self.epoch.start_time = time.time()
-        self.epoch.count += 1
-        self.epoch.loss = 0
-        self.epoch.num_correct = 0
+        # Determine whether this batch is a validation batch or not
+        if i > validation_at_index:
+            return True
+        else:
+            return False
 
-        pass
+    def __set_error_variables_to_zero(self) -> None:
 
-    # Deprecated
-    def end_epoch(self) -> None:
+        """ Variables for error tracking on train set """
 
-        """ [ Insert documentation ] """
+        # Per batch error for D_A, D_B
+        self.error_D_A, self.error_D_B = 0, 0
 
-        # print("- [TO-DO] YOLOv5 or newer to implement object detection before")
+        # Average error on D_A, D_B
+        self.cum_error_D_A, self.cum_error_D_B = 0, 0
+        self.avg_error_D_A, self.avg_error_D_B = 0, 0
 
-        # self.epoch.duration = time.time() - self.epoch.start_time
-        # self.run.duration = time.time() - self.run.start_time
+        # Per batch error for G
+        self.error_G_A, self.error_G_B = 0, 0
 
-        # loss = self.epoch.loss / len(self.loader.dataset)
-        # accuracy = self.epoch.num_correct / len(self.loader.dataset)
+        # Average error on G
+        self.cum_error_G_A, self.avg_error_G_A = 0, 0
+        self.cum_error_G_B, self.avg_error_G_B = 0, 0
 
-        # self.tb.add_scalar("Loss", loss, self.epoch.count)
-        # self.tb.add_scalar("Accuracy", accuracy, self.epoch.count)
+        """ Variables for error tracking on validation set """
 
-        # for name, param in self.network.named_parameters():
-        #     self.tb.add_histogram(name, param, self.epoch.count)
-        #     self.tb.add_histogram(f"{name}.grad", param.grad, self.epoch.count)
+        # Per batch error for D_A, D_B
+        self.v__error_D_A, self.v__error_D_B = 0, 0
 
-        # results = OrderedDict()
-        # results["run"] = self.run.count
-        # results["epoch"] = self.epoch.count
-        # results["loss"] = loss
-        # results["accuracy"] = accuracy
-        # results["epoch duration"] = self.epoch.duration
-        # results["run duration"] = self.run.duration
-        # for k, v in self.run.params._asdict().items():
-        #     results[k] = v
-        # self.run.data.append(results)
+        # Average error on D_A, D_B
+        self.v__cum_error_D_A, self.v__cum_error_D_B = 0, 0
+        self.v__avg_error_D_A, self.v__avg_error_D_B = 0, 0
 
-        # if print_df:
-        #     pprint.pprint(
-        #         pd.DataFrame.from_dict(self.run.data, orient="columns").sort_values("accuracy", ascending=False)
-        #     )
+        # Per batch error for G
+        self.v__error_G_A, self.v__error_G_B = 0, 0
 
-    # Deprecated
-    def track_loss(
-        self, i, real_image_A, real_image_B, fake_image_A, fake_image_B, fake_original_image_A, fake_original_image_B
-    ) -> None:
-
-        """ [ Insert documentation ] """
-
-        # Initiate a mean square error (MSE) loss function
-        mse_loss = nn.MSELoss()
-
-        # Calculate the mean square error (MSE) loss
-
-        # print("")
-        # print("fake_image_B.shape, real_image_A.shape", fake_image_B.shape, real_image_A.shape)
-        # print("fake_image_A.shape, real_image_B.shape", fake_image_A.shape, real_image_B.shape)
-        mse_loss_A = mse_loss(self.fake_image_B, self.real_image_A)
-        mse_loss_B = mse_loss(self.fake_image_A, self.real_image_B)
-
-        # Calculate the sum of all mean square error (MSE) losses
-        self.cum_mse_loss_A += mse_loss_A
-        self.cum_mse_loss_B += mse_loss_B
-
-        # Calculate the average mean square error (MSE) loss
-        self.avg_mse_loss_A = self.cum_mse_loss_A / (i + 1)
-        self.avg_mse_loss_B = self.cum_mse_loss_B / (i + 1)
-
-        """ Calculate losses for the generated (fake) original images """
-
-        # Calculate the mean square error (MSE) for the generated (fake) originals A and B
-
-        # print("fake_original_image_A.shape, real_image_B.shape", fake_original_image_A.shape, real_image_A.shape)
-        # print("fake_original_image_B.shape, real_image_A.shape", fake_original_image_B.shape, real_image_B.shape)
-        # print("")
-        self.mse_loss_f_or_A = mse_loss(self.fake_original_image_A, self.real_image_A)
-        self.mse_loss_f_or_B = mse_loss(self.fake_original_image_B, self.real_image_B)
-
-        # Calculate the average mean square error (MSE) for the fake originals A and B
-        self.cum_mse_loss_f_or_A += self.mse_loss_f_or_A
-        self.cum_mse_loss_f_or_B += self.mse_loss_f_or_B
-
-        # Calculate the average mean square error (MSE) for the fake originals A and B
-        self.avg_mse_loss_f_or_A = self.cum_mse_loss_f_or_A / (i + 1)
-        self.avg_mse_loss_f_or_B = self.cum_mse_loss_f_or_B / (i + 1)
+        # Average error on G
+        self.v__cum_error_G_A, self.v__avg_error_G_A = 0, 0
+        self.v__cum_error_G_B, self.v__avg_error_G_B = 0, 0
 
         pass
 
-        # self.epoch.loss += loss.item() * batch[0].shape[0]
+    def __create_per_epoch_csv_logs(self) -> None:
+
+        """ Create a per-epoch csv logs file of the current run """
+
+        # Create csv for the logs file of this run
+        with open(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/logs.csv", "w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(
+                [
+                    "Epoch",
+                    "Noise factor",
+                    "avg_error_D_A",
+                    "avg_error_D_B",
+                    "avg_error_G_A",
+                    "avg_error_G_B",
+                    "v__avg_error_D_A",
+                    "v__avg_error_D_B",
+                    "v__avg_error_G_A",
+                    "v__avg_error_G_B",
+                ]
+            )
+
+        pass
+
+    def __create_per_batch_csv_logs(self, epoch: int) -> None:
+
+        """ Create a per-batch csv logs file of the current epoch """
+
+        with open(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/logs/EP{epoch}__logs.csv", "w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(
+                [
+                    "Epoch",
+                    "Skip Disc.",
+                    "error_D_A",
+                    "error_D_B",
+                    "error_G_A",
+                    "error_G_B",
+                    "v_error_D_A",
+                    "v_error_D_B",
+                    "v_error_G_A",
+                    "v_error_G_B",
+                ]
+            )
+
+        pass
+
+    def __random_flip(self, real_label: torch.Tensor, fake_label: torch.Tensor, probability: float = 0.1):
+
+        """ Randomly flip labels following a given probability """
+
+        random_percentage = random.uniform(0, 1)
+
+        if random_percentage > probability:
+            return real_label, fake_label
+        else:
+            return fake_label, real_label
+
+    def __smooth_one_hot(self, true_label: torch.Tensor, classes: int, smoothing: float = 0.1):
+
+        """ Smoothen one-hot encoced labels y_ls = (1 - α) * y_hot + α / K """
+
+        smooth_label = (1 - smoothing) * true_label + smoothing / classes
+
+        return smooth_label
+
+    def __read_data(self, run, data) -> None:
+
+        # Get image A and image B
+        if self.dataset_group == "l2r":
+            self.real_image_A = data["left"].to(run.device)
+            self.real_image_B = data["right"].to(run.device)
+
+        elif self.dataset_group == "s2d":
+            real_image_A_left = data["A_left"].to(run.device)
+            real_image_A_right = data["A_right"].to(run.device)
+            real_image_B = data["B"].to(run.device)
+
+            # Concatenate left- and right view into one stereo image
+            self.real_image_A = torch.cat((real_image_A_left, real_image_A_right), dim=-1)
+            self.real_image_B = real_image_B
+
+        else:
+            raise Exception(f"Can not read input images, given group '{self.dataset_group}' is incorrect.")
+
+        # Real data label is 1, fake data label is 0.
+        self.real_label = torch.full((run.batch_size, self.channels), 1, device=run.device, dtype=torch.float32)
+        self.fake_label = torch.full((run.batch_size, self.channels), 0, device=run.device, dtype=torch.float32)
+
+        pass
+
+    def __add_discriminator_noise(self, epoch, run) -> None:
+
+        """ Add decaying Gaussian noise to discriminator A and B real/fake inputs """
+
+        # Set mean and standard deviation
+        mean, std = 0.5, 0.5
+
+        # Calculate until which epoch there is noise
+        noise_until_percentage = 0.90
+
+        # Noise is gone at epoch 80, if the run is set to a 100 epochs
+        noise_until_epoch = noise_until_percentage * run.num_epochs
+
+        # Calculate noise factor
+        if epoch > 0:
+            self.noise_factor = round(1 - (epoch / noise_until_epoch), 3)
+        else:
+            self.noise_factor = 1
+
+        # Create the noise for the real images
+        noise_real_A = (torch.randn(self.real_image_A.size()) * std + mean).to(run.device)
+        noise_real_B = (torch.randn(self.real_image_B.size()) * std + mean).to(run.device)
+
+        # Create the noise for the fake images
+        noise_fake_A = (torch.randn(self.fake_image_A.size()) * std + mean).to(run.device)
+        noise_fake_B = (torch.randn(self.fake_image_B.size()) * std + mean).to(run.device)
+
+        # Add decaying noise to the real images (only used by discriminator)
+        self.real_image_A_noise = self.real_image_A + (noise_real_A * self.noise_factor)
+        self.real_image_B_noise = self.real_image_B + (noise_real_B * self.noise_factor)
+
+        # Add decaying noise to the fake images (only used by discriminator)
+        self.fake_image_A_noise = self.fake_image_A + (noise_fake_A * self.noise_factor)
+        self.fake_image_B_noise = self.fake_image_B + (noise_fake_B * self.noise_factor)
+
+        """ Label smoothing and random flipping """
+
+        # Smoothen the labels (only used by the discriminator)
+        self.real_smooth_label = self.__smooth_one_hot(self.real_label, 2, 0.1)
+        self.fake_smooth_label = self.__smooth_one_hot(self.fake_label, 2, 0.1)
+
+        # Randomly flip the smooth labels (only used by the discriminator)
+        self.real_smooth_label, self.fake_smooth_label = self.__random_flip(
+            self.real_smooth_label, self.fake_smooth_label, 0.10
+        )
+
+        pass
+
+    def __update_generators(self, i) -> None:
+
+        """ Update Generator networks: A2B and B2A """
+
+        # Only zero the gradients when using training data
+        if self.batch_is_validation == False:
+
+            # Zero the gradients
+            self.optimizer_G_A2B.zero_grad()
+            self.optimizer_G_B2A.zero_grad()
+
+        """ Generator loss """
+
+        # GAN loss: D_A(G_A(A))
+        self.fake_image_A = self.net_G_B2A(self.real_image_B)
+        self.fake_output_A = self.net_D_A(self.fake_image_A)
+        self.loss_GAN_B2A = self.adversarial_loss(self.fake_output_A, self.real_label)
+
+        # GAN loss: D_B(G_B(B))
+        self.fake_image_B = self.net_G_A2B(self.real_image_A)
+        self.fake_output_B = self.net_D_B(self.fake_image_B)
+        self.loss_GAN_A2B = self.adversarial_loss(self.fake_output_B, self.real_label)
+
+        """ Identity loss: helps to preserve colour and prevent reverse colour in the result  """
+
+        lambda_A = 10  # 10 by default
+        lambda_B = 10  # 10 by default
+        lamba_identity = 0.5  # 0.5 by default
+
+        # G_A2B should be identity if real_image_B is fed: || G_A2B(B) - B ||
+        self.identity_image_A = self.net_G_A2B(self.real_image_B)
+        self.loss_identity_A = self.identity_loss(self.identity_image_A, self.real_image_B) * lambda_B * lamba_identity
+
+        # G_B2A should be identity if real_image_A is fed: || G_B2A(A) - A ||
+        self.identity_image_B = self.net_G_B2A(self.real_image_A)
+        self.loss_identity_B = self.identity_loss(self.identity_image_B, self.real_image_A) * lambda_A * lamba_identity
+
+        """ Cycle loss """
+
+        # Cycle loss
+        self.recovered_image_A = self.net_G_B2A(self.fake_image_B)
+        self.loss_cycle_ABA = self.cycle_loss(self.recovered_image_A, self.real_image_A) * lambda_A
+
+        self.recovered_image_B = self.net_G_A2B(self.fake_image_A)
+        self.loss_cycle_BAB = self.cycle_loss(self.recovered_image_B, self.real_image_B) * lambda_B
+
+        # Only update weights when using training data
+        if self.batch_is_validation == False:
+
+            # Error G_A (removed: self.loss_identity_A)
+            self.error_G_A = self.loss_GAN_A2B + self.loss_identity_A + self.loss_cycle_ABA
+
+            # Error G_B (removed: self.loss_identity_B)
+            self.error_G_B = self.loss_GAN_B2A + self.loss_identity_B + self.loss_cycle_BAB
+
+            # Average error on G_A
+            self.cum_error_G_A += self.error_G_A
+            self.avg_error_G_A = self.cum_error_G_A / (i + 1)
+
+            # Average error on G_B
+            self.cum_error_G_B += self.error_G_B
+            self.avg_error_G_B = self.cum_error_G_B / (i + 1)
+
+            # Calculate gradients for G_A and G_B
+            self.error_G_A.backward()
+            self.error_G_B.backward()
+
+            # Update the Generator networks
+            self.optimizer_G_A2B.step()
+            self.optimizer_G_B2A.step()
+
+        # Validate model on the validation data - do not update weights
+        else:
+
+            # Error G_A (removed: self.loss_identity_A)
+            self.v__error_G_A = self.loss_GAN_A2B + self.loss_cycle_ABA
+
+            # Error G_B (removed: self.loss_identity_B)
+            self.v__error_G_B = self.loss_GAN_B2A + self.loss_cycle_BAB
+
+            # Cumulative and average error of G_A
+            self.v__cum_error_G_A += self.v__error_G_A
+            self.v__avg_error_G_A = self.v__cum_error_G_A / (i + 1)
+
+            # Cumulative and average error of G_B
+            self.v__cum_error_G_B += self.v__error_G_B
+            self.v__avg_error_G_B = self.v__cum_error_G_B / (i + 1)
+
+        pass
+
+    def __update_discriminators(self, i) -> None:
+
+        """" Update discriminator A """
+
+        # Only zero the gradient when using training data
+        if self.batch_is_validation == False:
+
+            # Set D_A gradients to zero
+            self.optimizer_D_A.zero_grad()
+
+        # Real A image loss
+        self.real_output_A = self.net_D_A(self.real_image_A_noise)
+        self.error_D_real_A = self.adversarial_loss(self.real_output_A, self.real_smooth_label)
+
+        # Fake image A loss
+        self.fake_image_A_noise = self.fake_A_buffer.push_and_pop(self.fake_image_A_noise)
+        self.fake_output_A = self.net_D_A(self.fake_image_A_noise.detach())
+        self.error_D_fake_A = self.adversarial_loss(self.fake_output_A, self.fake_smooth_label)
+
+        # Combined loss and calculate gradients
+        self.error_D_A = (self.error_D_real_A + self.error_D_fake_A) / 2
+
+        # Only update weights when using training data
+        if self.batch_is_validation == False:
+
+            # Cumulative and average error of D_A
+            self.cum_error_D_A += self.error_D_A
+            self.avg_error_D_A = self.cum_error_D_A / (i + 1)
+
+            # Calculate gradients for D_A
+            self.error_D_A.backward()
+
+            # Update D_A weights
+            self.optimizer_D_A.step()
+
+        # Validate model on the validation data - do not update weights
+        else:
+
+            # Cumulative and average error of D_A on the validation set
+            self.v__cum_error_D_A += self.error_D_A
+            self.v__avg_error_D_A = self.v__cum_error_D_A / (i + 1)
+
+            pass
+
+        """" Update discriminator B """
+
+        # Only zero the gradient when using training data
+        if self.batch_is_validation == False:
+
+            # Set D_B gradients to zero
+            self.optimizer_D_B.zero_grad()
+
+        # Real B image loss
+        self.real_output_B = self.net_D_B(self.real_image_B_noise)
+        self.error_D_real_B = self.adversarial_loss(self.real_output_B, self.real_smooth_label)
+
+        # Fake image B loss
+        self.fake_image_B_noise = self.fake_B_buffer.push_and_pop(self.fake_image_B_noise)
+        self.fake_output_B = self.net_D_B(self.fake_image_B_noise.detach())
+        self.error_D_fake_B = self.adversarial_loss(self.fake_output_B, self.fake_smooth_label)
+
+        # Combined loss and calculate gradients
+        self.error_D_B = (self.error_D_real_B + self.error_D_fake_B) / 2
+
+        # Only update weights when using training data
+        if self.batch_is_validation == False:
+
+            # Cumulative and average error of D_A
+            self.cum_error_D_B += self.error_D_B
+            self.avg_error_D_B = self.cum_error_D_B / (i + 1)
+
+            # Calculate gradients for D_B
+            self.error_D_B.backward()
+
+            # Update D_B weights
+            self.optimizer_D_B.step()
+
+        # Validate model on the validation data - do not update weights
+        else:
+
+            # Cumulative and average error of D_A on the validation set
+            self.v__cum_error_D_B += self.error_D_B
+            self.v__avg_error_D_B = self.v__cum_error_D_B / (i + 1)
+
+            pass
+
+    # Currently not used, due to CUDA memory issues
+    def __regenerate_inputs(self) -> None:
+
+        """ Network losses and input data regeneration """
+
+        """
+
+            Note:
+
+            # This is the identity_image_B, perhaps copy the variable itself -> to-do
+            _fake_image_A = self.net_G_A2B(self.real_image_B)
+
+            # This is the identity_image_A, perhaps copy the variable itself -> to-do
+            _fake_image_B = self.net_G_B2A(self.real_image_A)
+
+        """
+
+        # # Generate original image from generated (fake) output. So run, respectively, fake A & B image through B2A & A2B
+        # self.fake_original_image_A = self.net_G_B2A(self.identity_image_A)
+        # self.fake_original_image_B = self.net_G_A2B(self.identity_image_B)
+
+        # # Convert to usable images (changes the tensor range from [-1, 1] to [0, 1])
+        # self.fake_image_A = 0.5 * (self.fake_image_A.data + 1.0)
+        # self.fake_image_B = 0.5 * (self.fake_image_B.data + 1.0)
+
+        # # Convert to usable images (changes the tensor range from [-1, 1] to [0, 1])
+        # self.fake_original_image_A = 0.5 * (self.fake_original_image_A.data + 1.0)
+        # self.fake_original_image_B = 0.5 * (self.fake_original_image_B.data + 1.0)
+
+        pass
+
+    # Currently not used, due to CUDA memory issues
+    def __update_losses(self) -> None:
+
+        """ Calculate a cumulative MSE loss and  """
+
+        # # Initiate a mean square error (MSE) loss function
+        # mse_loss = nn.MSELoss()
+
+        # # Calculate the mean square error (MSE) loss
+        # mse_loss_A = mse_loss(self.fake_image_B, self.real_image_A)
+        # mse_loss_B = mse_loss(self.fake_image_A, self.real_image_B)
+
+        # # Calculate the sum of all mean square error (MSE) losses
+        # self.cum_mse_loss_A += mse_loss_A
+        # self.cum_mse_loss_B += mse_loss_B
+
+        # # Calculate the average mean square error (MSE) loss
+        # self.avg_mse_loss_A = self.cum_mse_loss_A / (i + 1)
+        # self.avg_mse_loss_B = self.cum_mse_loss_B / (i + 1)
+
+        # """ Calculate losses for the generated (fake) original images """
+
+        # # Calculate the mean square error (MSE) for the generated (fake) originals A and B
+        # self.mse_loss_f_or_A = mse_loss(self.fake_original_image_A, self.real_image_A)
+        # self.mse_loss_f_or_B = mse_loss(self.fake_original_image_B, self.real_image_B)
+
+        # # Calculate the average mean square error (MSE) for the fake originals A and B
+        # self.cum_mse_loss_f_or_A += self.mse_loss_f_or_A
+        # self.cum_mse_loss_f_or_B += self.mse_loss_f_or_B
+
+        # # Calculate the average mean square error (MSE) for the fake originals A and B
+        # self.avg_mse_loss_f_or_A = self.cum_mse_loss_f_or_A / (i + 1)
+        # self.avg_mse_loss_f_or_B = self.cum_mse_loss_f_or_B / (i + 1)
+
+        pass
+
+    def __save_realtime_output(self, i) -> None:
+
+        """ (5) Save all generated network output and """
+
+        if i % self.SHOW_IMAGE_FREQ == 0:
+
+            if self.batch_is_validation == False:
+
+                # Filepath and filename for the real-time TRAINING output images
+                (
+                    filepath_real_A,
+                    filepath_real_B,
+                    filepath_real_A_noise,
+                    filepath_real_B_noise,
+                    filepath_fake_A,
+                    filepath_fake_B,
+                    filepath_fake_A_noise,
+                    filepath_fake_B_noise,
+                    # filepath_f_or_A,
+                    # filepath_f_or_B,
+                ) = (
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/real_sample.png",
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/real_sample.png",
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/real_sample_noise.png",
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/real_sample_noise.png",
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/fake_sample.png",
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/fake_sample.png",
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/fake_sample_noise.png",
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/fake_sample_noise.png",
+                    # f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/fake_original.png",
+                    # f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/fake_original.png",
+                )
+
+            else:
+                #
+                #  Filepath and filename for the real-time VALIDATION output images
+                (
+                    filepath_real_A,
+                    filepath_real_B,
+                    filepath_real_A_noise,
+                    filepath_real_B_noise,
+                    filepath_fake_A,
+                    filepath_fake_B,
+                    filepath_fake_A_noise,
+                    filepath_fake_B_noise,
+                    # filepath_f_or_A,
+                    # filepath_f_or_B,
+                ) = (
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__real_sample.png",
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__real_sample.png",
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__real_sample_noise.png",
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__real_sample_noise.png",
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__fake_sample.png",
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__fake_sample.png",
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__fake_sample_noise.png",
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__fake_sample_noise.png",
+                    # f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__fake_original.png",
+                    # f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__fake_original.png",
+                )
+
+            # Save real input images
+            vutils.save_image(self.real_image_A, filepath_real_A, normalize=True)
+            vutils.save_image(self.real_image_B, filepath_real_B, normalize=True)
+
+            # Save real input images with noise
+            vutils.save_image(self.real_image_A_noise, filepath_real_A_noise, normalize=True)
+            vutils.save_image(self.real_image_B_noise, filepath_real_B_noise, normalize=True)
+
+            # Save the generated (fake) image
+            vutils.save_image(self.fake_image_A.detach(), filepath_fake_A, normalize=True)
+            vutils.save_image(self.fake_image_B.detach(), filepath_fake_B, normalize=True)
+
+            # Save the generated (fake) image
+            vutils.save_image(self.fake_image_A_noise.detach(), filepath_fake_A_noise, normalize=True)
+            vutils.save_image(self.fake_image_B_noise.detach(), filepath_fake_B_noise, normalize=True)
+
+            # # Save the generated (fake) original images
+            # vutils.save_image(self.fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
+            # vutils.save_image(self.fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
+
+        pass
+
+    def __save_per_epoch_logs(self, epoch: int) -> None:
+
+        # Create csv for the logs file of this run
+        with open(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/logs/EP{epoch}__logs.csv", "a+", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(
+                [
+                    "Epoch",
+                    f"{self.error_D_A:.4f}",
+                    f"{self.error_D_B:.4f}",
+                    f"{self.error_G_A:.4f}",
+                    f"{self.error_G_B:.4f}",
+                    f"{self.v__error_D_A:.4f}",
+                    f"{self.v__error_D_B:.4f}",
+                    f"{self.v__error_G_A:.4f}",
+                    f"{self.v__error_G_B:.4f}",
+                ]
+            )
+
+        pass
+
+    def __print_progress(self, i, epoch, run) -> None:
+
+        """ 
+
+            # L_D(A)                = Loss discriminator A
+            # L_D(B)                = Loss discriminator B
+            # L_G(A2B)              = Loss generator A2B
+            # L_G(B2A)              = Loss generator B2A
+            # L_G_ID                = Combined oentity loss generators A2B + B2A
+            # L_G_GAN               = Combined GAN loss generators A2B + B2A
+            # L_G_CYCLE             = Combined cycle consistency loss Generators A2B + B2A
+            # G(A2B)_MSE(avg)       = Mean square error (MSE) loss over the generated output B vs. the real image A
+            # G(B2A)_MSE(avg)       = Mean square error (MSE) loss over the generated output A vs. the real image B
+            # G(A2B2A)_MSE(avg)     = Average mean square error (MSE) loss over the generated original image A vs. the real image A
+            # G(B2A2B)_MSE(avg)     = Average mean square error (MSE) loss over the generated original image B vs. the real image B
+
+        """
+
+        if self.batch_is_validation == True:
+            self.progress_bar.set_description(
+                f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}] [val={self.batch_is_validation}] [nf={self.noise_factor:.3f}]  ||  "
+                f"v__avg_error_D_A: {self.v__avg_error_D_A:.3f} ; "
+                f"v__avg_error_D_B: {self.v__avg_error_D_B:.3f}  ||  "
+                f"v__avg_error_G_A2B: {self.v__avg_error_G_A:.3f} ; "
+                f"v__avg_error_G_B2A: {self.v__avg_error_G_B:.3f}  ||  "
+            )
+        else:
+            self.progress_bar.set_description(
+                f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}] [val={self.batch_is_validation}] [nf={self.noise_factor:.3f}]  ||  "
+                f"avg_error_D_A: {self.avg_error_D_A:.3f} ; "
+                f"avg_error_D_B: {self.avg_error_D_B:.3f}  ||  "
+                f"avg_error_G_A2B: {self.avg_error_G_A:.3f} ; "
+                f"avg_error_G_B2A: {self.avg_error_G_B:.3f}  ||  "
+            )
+
+        pass
+
+    """ [ Private functions ] Called once per epoch """
+
+    def __update_learning_rate(self) -> None:
+
+        self.lr_scheduler_G_A2B.step()
+        self.lr_scheduler_G_B2A.step()
+        self.lr_scheduler_D_A.step()
+        self.lr_scheduler_D_B.step()
+
+    def __save_end_epoch_output(self, epoch) -> None:
+
+        # Filepath and filename for the per-epoch output images
+        (
+            filepath_real_A,
+            filepath_real_B,
+            filepath_real_A_noise,
+            filepath_real_B_noise,
+            filepath_fake_A,
+            filepath_fake_B,
+            filepath_fake_A_noise,
+            filepath_fake_B_noise,
+            # filepath_f_or_A,
+            # filepath_f_or_B,
+        ) = (
+            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___real_sample.png",
+            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___real_sample.png",
+            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___real_sample_noise.png",
+            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___real_sample_noise.png",
+            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___fake_sample.png",
+            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___fake_sample.png",
+            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___fake_sample_noise.png",
+            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___fake_sample_noise.png",
+            # f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___fake_original_MSE{self.avg_mse_loss_A:.3f}.png",
+            # f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___fake_original_MSE{self.avg_mse_loss_B:.3f}.png",
+        )
+
+        # Save real input images
+        vutils.save_image(self.real_image_A, filepath_real_A, normalize=True)
+        vutils.save_image(self.real_image_B, filepath_real_B, normalize=True)
+
+        # Save real input images with noise
+        vutils.save_image(self.real_image_A_noise, filepath_real_A_noise, normalize=True)
+        vutils.save_image(self.real_image_B_noise, filepath_real_B_noise, normalize=True)
+
+        # Save the generated (fake) image
+        vutils.save_image(self.fake_image_A.detach(), filepath_fake_A, normalize=True)
+        vutils.save_image(self.fake_image_B.detach(), filepath_fake_B, normalize=True)
+
+        # Save the generated (fake) image
+        vutils.save_image(self.fake_image_A_noise.detach(), filepath_fake_A_noise, normalize=True)
+        vutils.save_image(self.fake_image_B_noise.detach(), filepath_fake_B_noise, normalize=True)
+
+        # # Save the generated (fake) original images
+        # vutils.save_image(self.fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
+        # vutils.save_image(self.fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
+
+        # Check point dir
+        model_weights_dir = f"{self.DIR_WEIGHTS}/{self.RUN_PATH}"
+
+        # Check points, save weights after each epoch
+        torch.save(self.net_G_A2B.state_dict(), f"{model_weights_dir}/net_G_A2B/net_G_A2B_epoch_{epoch}.pth")
+        torch.save(self.net_G_B2A.state_dict(), f"{model_weights_dir}/net_G_B2A/net_G_B2A_epoch_{epoch}.pth")
+        torch.save(self.net_D_A.state_dict(), f"{model_weights_dir}/net_D_A/net_D_A_epoch_{epoch}.pth")
+        torch.save(self.net_D_B.state_dict(), f"{model_weights_dir}/net_D_B/net_D_B_epoch_{epoch}.pth")
+
+        pass
+
+        # Save the network weights at the end of the epoch
+
+    def __save_end_epoch_logs(self, epoch) -> None:
+
+        with open(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/logs.csv", "a+", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(
+                [
+                    epoch,
+                    self.noise_factor,
+                    f"{self.avg_error_D_A:.5f}",
+                    f"{self.avg_error_D_B:.5f}",
+                    f"{self.avg_error_G_A:.5f}",
+                    f"{self.avg_error_G_B:.5f}",
+                    f"{self.v__avg_error_D_A:.5f}",
+                    f"{self.v__avg_error_D_B:.5f}",
+                    f"{self.v__avg_error_G_A:.5f}",
+                    f"{self.v__avg_error_G_B:.5f}",
+                ]
+            )
+
+        pass
+
+    """ [ Private functions ] Plotting function """
+
+    def __save_plot_per_batch(self, i, epoch) -> None:
+
+        """ Append the current per-batch losses to the arrays containing the network losses """
+
+        self.batch_losses_G_A.append(self.error_G_A.cpu().detach().numpy())
+        self.batch_losses_G_B.append(self.error_G_B.cpu().detach().numpy())
+        self.batch_losses_D_A.append(self.error_D_A.cpu().detach().numpy())
+        self.batch_losses_D_B.append(self.error_D_B.cpu().detach().numpy())
+
+        """ Plot losses """
+
+        if i % self.SHOW_GRAPH_FREQ == 0:
+
+            # Create figure
+            self.per_batch_figure, self.per_batch_axes = plt.subplots(2)
+
+            # Set titles
+            self.per_batch_axes[0].set_title(f"Generator A and Generator B loss during epoch {epoch}")
+            self.per_batch_axes[1].set_title(f"Discriminator A and Discriminator B loss during epoch {epoch}")
+
+            # Set labels
+            self.per_batch_axes[0].set(xlabel="Batch", ylabel="G Loss")
+            self.per_batch_axes[1].set(xlabel="Batch", ylabel="D Loss")
+
+            # Add gridlines
+            self.per_batch_axes[0].grid()
+            self.per_batch_axes[1].grid()
+
+            # Plot generator values
+            self.per_batch_axes[0].plot(self.batch_losses_G_A, label="G_A", color="tab:blue")
+            self.per_batch_axes[0].plot(self.batch_losses_G_B, label="G_B", color="tab:orange")
+
+            # # Fill between generator values
+            # self.per_batch_axes[0].fill_between(
+            #     x=np.arange(i + 1), y1=0, y2=self.batch_losses_G_A, facecolor="tab:blue", alpha=0.5
+            # )
+            # self.per_batch_axes[0].fill_between(
+            #     x=np.arange(i + 1), y1=0, y2=self.batch_losses_G_B, facecolor="tab:orange", alpha=0.5
+            # )
+
+            # Plot discriminator values
+            self.per_batch_axes[1].plot(self.batch_losses_D_A, label="D_A", color="tab:blue")
+            self.per_batch_axes[1].plot(self.batch_losses_D_B, label="D_B", color="tab:orange")
+
+            # # Fill between discriminator values
+            # self.per_batch_axes[1].fill_between(
+            #     np.arange(i + 1), 0, self.batch_losses_D_A, facecolor="tab:blue", alpha=0.5
+            # )
+            # self.per_batch_axes[1].fill_between(
+            #     np.arange(i + 1), 0, self.batch_losses_D_B, facecolor="tab:orange", alpha=0.5
+            # )
+
+            # Add legends
+            self.per_batch_axes[0].legend(loc="upper right", frameon=True).get_frame()
+            self.per_batch_axes[1].legend(loc="upper right", frameon=True).get_frame()
+
+            # Adjust layout and save
+            self.per_batch_figure.tight_layout(h_pad=2.0, w_pad=0.0)
+            self.per_batch_figure.savefig(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/plots/EP{epoch}__plot.png")
+
+            # Close figure
+            plt.close(self.per_batch_figure)
+            plt.close("all")
+
+        pass
+
+    def __save_plot_per_epoch(self, epoch) -> None:
+
+        """ Append the current average losses to the arrays containing the network losses """
+
+        self.losses_G_A.append(self.avg_error_G_A.cpu().detach().numpy())
+        self.losses_G_B.append(self.avg_error_G_B.cpu().detach().numpy())
+        self.losses_D_A.append(self.avg_error_D_A.cpu().detach().numpy())
+        self.losses_D_B.append(self.avg_error_D_B.cpu().detach().numpy())
+
+        """ Plot losses """
+
+        # Create figure
+        self.per_epoch_figure, self.per_epoch_axes = plt.subplots(2)
+
+        # Set titles
+        self.per_epoch_axes[0].set_title(f"Generator A and Generator B loss during training")
+        self.per_epoch_axes[1].set_title(f"Discriminator A and Discriminator B loss training")
+
+        # Set labels
+        self.per_epoch_axes[0].set(xlabel="Batch", ylabel="G Loss")
+        self.per_epoch_axes[1].set(xlabel="Batch", ylabel="D Loss")
+
+        # Add gridlines
+        self.per_epoch_axes[0].grid()
+        self.per_epoch_axes[1].grid()
+
+        # Plot generator values
+        self.per_epoch_axes[0].plot(self.losses_G_A, label="G_A", color="tab:blue")
+        self.per_epoch_axes[0].plot(self.losses_G_B, label="G_B", color="tab:orange")
+
+        # # Fill between generator values
+        # self.per_epoch_axes[0].fill_between(
+        #     x=np.arange(epoch + 1), y1=0, y2=self.losses_G_A, facecolor="tab:blue", alpha=0.5
+        # )
+        # self.per_epoch_axes[0].fill_between(
+        #     x=np.arange(epoch + 1), y1=0, y2=self.losses_G_B, facecolor="tab:orange", alpha=0.5
+        # )
+
+        # Plot discriminator values
+        self.per_epoch_axes[1].plot(self.losses_D_A, label="D_A", color="tab:blue")
+        self.per_epoch_axes[1].plot(self.losses_D_B, label="D_B", color="tab:orange")
+
+        # # Fill between discriminator values
+        # self.per_epoch_axes[1].fill_between(
+        #     x=np.arange(epoch + 1), y1=0, y2=self.losses_D_A, facecolor="tab:blue", alpha=0.5
+        # )
+        # self.per_epoch_axes[1].fill_between(
+        #     x=np.arange(epoch + 1), y1=0, y2=self.losses_D_B, facecolor="tab:orange", alpha=0.5
+        # )
+
+        # Add legends
+        self.per_epoch_axes[0].legend(loc="upper right", frameon=True).get_frame()
+        self.per_epoch_axes[1].legend(loc="upper right", frameon=True).get_frame()
+
+        # Adjust layout and save
+        self.per_epoch_figure.tight_layout(h_pad=2.0, w_pad=0.0)
+        self.per_epoch_figure.savefig(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/plot.png")
+
+        # Close figure
+        plt.close(self.per_epoch_figure)
+        plt.close("all")
+
+        pass
 
     @staticmethod
     def makedirs(path: str, dir: str):
 
         if dir == "outputs":
             try:
+                os.makedirs(os.path.join(path, "logs"))
+                os.makedirs(os.path.join(path, "plots"))
                 os.makedirs(os.path.join(path, "A"))
                 os.makedirs(os.path.join(path, "B"))
                 os.makedirs(os.path.join(path, "A", "epochs"))
                 os.makedirs(os.path.join(path, "B", "epochs"))
-                os.makedirs(os.path.join(path, "A", "logs"))
-                os.makedirs(os.path.join(path, "B", "logs"))
             except OSError:
                 pass
 
@@ -771,7 +1111,7 @@ class RunCycleManager:
                 pass
 
     @staticmethod
-    def get_run_path(run, dataset_name, channels) -> str:
+    def get_run_path(run, dataset_name: str, channels: int, use_one_directory: bool = False) -> str:
 
         # Store today's date in string format
         TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
@@ -784,13 +1124,16 @@ class RunCycleManager:
 
         RUN_PATH = f"{dataset_name}/{TODAY_DATE}/{RUN_NAME}"
 
+        if use_one_directory:
+            RUN_PATH = f"QUICK_DEV_DIR"
+
         return RUN_PATH
 
 
 PARAMETERS: OrderedDict = OrderedDict(
     device=[torch.device("cuda" if torch.cuda.is_available() else "cpu")],
     shuffle=[True],
-    num_workers=[4],
+    num_workers=[8],
     manualSeed=[999],
     learning_rate=[0.0002],
     batch_size=[1],
@@ -801,6 +1144,9 @@ PARAMETERS: OrderedDict = OrderedDict(
 
 # Execute main code
 if __name__ == "__main__":
+
+    # Clear the terminal
+    os.system("cls")
 
     try:
 
@@ -820,16 +1166,21 @@ if __name__ == "__main__":
 
         """ Train a [S2D] model on the GRAYSCALE dataset """
 
-        # s2d_dataset_train_GRAYSCALE = mydataloader.get_dataset(
-        #     "s2d", "Test_Set_GRAYSCALE", "train", (68, 120), 1, False
-        # )
+        # s2d_dataset_train_GRAYSCALE = mydataloader.get_dataset("s2d", "Test_Set_GRAYSCALE", "train", (68, 120), 1, False)
         # s2d_manager_GRAYSCALE = RunCycleManager(s2d_dataset_train_GRAYSCALE, 1, PARAMETERS)
         # s2d_manager_GRAYSCALE.start_cycle()
 
         """ Train a [S2D] model on the RGB dataset """
 
-        s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (68, 120), 3, False)
-        s2d_manager_RGB = RunCycleManager(s2d_dataset_train_RGB, 3, PARAMETERS)
+        # s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (68, 120), 3, False)
+        # # s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (40, 60), 3, False)
+        # s2d_manager_RGB = RunCycleManager(s2d_dataset_train_RGB, 3, PARAMETERS)
+        # s2d_manager_RGB.start_cycle()
+
+        """ _____________ """
+
+        s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (68, 120), 1, False)
+        s2d_manager_RGB = RunCycleManager(s2d_dataset_train_RGB, 1, PARAMETERS)
         s2d_manager_RGB.start_cycle()
 
     except KeyboardInterrupt:

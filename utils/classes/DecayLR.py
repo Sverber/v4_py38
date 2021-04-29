@@ -1,4 +1,5 @@
 class DecayLR:
+    
     def __init__(self, epochs, offset, decay_epochs):
         epoch_flag = epochs - decay_epochs
         assert epoch_flag > 0, "Decay must start before the training session ends!"

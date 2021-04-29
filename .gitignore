@@ -14,9 +14,6 @@
 dataset/*
 outputs/*
 results/*
-synthesis/assets/**/A/*
-synthesis/assets/**/B/*
-synthesis/models/*
 weights/*
 
 # Keep the folders directories
@@ -24,6 +21,4 @@ weights/*
 !outputs/.gitkeep 
 !results/.gitkeep 
 !runs/.gitkeep
-!synthesis/assets/.gitkeep 
-!synthesis/models/.gitkeep 
 !weights/.gitkeep 

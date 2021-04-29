@@ -2,38 +2,31 @@
 from __future__ import absolute_import, division, print_function
 
 import os
+import cv2
 import sys
-import time
 import numpy as np
+import PIL.Image as PIL
+import matplotlib as mpl
+import matplotlib.cm as cm
 
 import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
 import torch.utils.data
 import torch.utils.data.distributed
-from torchvision.transforms.transforms import Grayscale
 import torchvision.utils as vutils
-import torchvision.transforms as transforms
 
 from PIL import Image
 from tqdm import tqdm
 from datetime import datetime
 from collections import OrderedDict
-from skimage.metrics import structural_similarity as ssim
 
 from torch.utils.data.dataloader import DataLoader
 
-from synthesis.Synthesis import Synthesis
-
-from utils.functions.initialize_weights import initialize_weights
-
-from utils.classes.DecayLR import DecayLR
-from utils.classes.ReplayBuffer import ReplayBuffer
+from utils.classes.dataloaders import MyDataLoader
 from utils.classes.RunCycleBuilder import RunCycleBuilder
 from utils.classes.RunCycleManager import RunCycleManager
 from utils.classes.StereoDisparityDataset import StereoDisparityDataset
-
-from utils.models.cycle.Discriminator import Discriminator
 from utils.models.cycle.Generators import Generator
 
 
@@ -44,10 +37,40 @@ DIR_RESULTS = f"./results"
 DIR_WEIGHTS = f"./weights"
 
 
+PARAMETERS: OrderedDict = OrderedDict(
+    device=[torch.device("cuda" if torch.cuda.is_available() else "cpu")],
+    shuffle=[True],
+    num_workers=[8],
+    manualSeed=[999],
+    learning_rate=[0.0002],
+    batch_size=[1],
+    num_epochs=[100],
+    decay_epochs=[50],
+)
+
+
+# Initialize weights
+def initialize_weights(m):
+
+    """ Custom weights initialization called on net_G and net_D """
+
+    classname = m.__class__.__name__
+
+    if classname.find("Conv") != -1:
+        torch.nn.init.normal_(m.weight, 0.0, 0.02)
+
+    elif classname.find("BatchNorm") != -1:
+        torch.nn.init.normal_(m.weight, 1.0, 0.02)
+        torch.nn.init.zeros_(m.bias)
+
+    pass
+
+
 # Testing function
 def test(
     dataset: StereoDisparityDataset,
     parameters: OrderedDict,
+    channels: int,
     #
     dataset_group: str,
     dataset_name: str,
@@ -65,18 +88,22 @@ def test(
     # Iterate over every run, based on the configurated params
     for run in RunCycleBuilder.get_runs(parameters):
 
+        # Clear occupied CUDA memory
+        torch.cuda.empty_cache()
+
         # Store today's date in string format
         TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
         TODAY_TIME = datetime.today().strftime("%H.%M.%S")
 
         # Create a unique name for this run
         RUN_NAME = f"{TODAY_TIME}___EP{run.num_epochs}_DE{run.decay_epochs}_LR{run.learning_rate}_BS{run.batch_size}"
-        RUN_PATH = f"{dataset_name}/{TODAY_DATE}/{RUN_NAME}"
+        RUN_PATH = f"{dataset_group}/{dataset_name}/{TODAY_DATE}/{RUN_NAME}"
 
         # Make required directories for testing
         try:
-            os.makedirs(os.path.join(DIR_RESULTS, dataset_name, RUN_PATH, "A"))
-            os.makedirs(os.path.join(DIR_RESULTS, dataset_name, RUN_PATH, "B"))
+            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "A"))
+            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "B"))
+            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "D"))
         except OSError:
             pass
 
@@ -89,8 +116,8 @@ def test(
         )
 
         # Create model
-        netG_A2B = Generator(in_channels=3, out_channels=3).to(run.device)
-        netG_B2A = Generator(in_channels=3, out_channels=3).to(run.device)
+        netG_A2B = Generator(in_channels=channels, out_channels=channels).to(run.device)
+        netG_B2A = Generator(in_channels=channels, out_channels=channels).to(run.device)
 
         # Load state dicts
         netG_A2B.load_state_dict(torch.load(os.path.join(str(path_to_folder), "net_G_A2B", model_netG_A2B)))
@@ -175,7 +202,19 @@ def test(
             """ (1) Define filepaths, save generated output and print a progress bar """
 
             # Filepath and filename for the real and generated output images
-            filepath_real_A, filepath_real_B, filepath_fake_A, filepath_fake_B, filepath_f_or_A, filepath_f_or_B = (
+            (
+                filepath_disparity_real,
+                filepath_disparity_fake,
+                filepath_real_A,
+                filepath_real_B,
+                filepath_fake_A,
+                filepath_fake_B,
+                filepath_f_or_A,
+                filepath_f_or_B,
+            ) = (
+                f"{DIR_RESULTS}/{RUN_PATH}/D/{i + 1:04d}___disparity_real.png",
+                f"{DIR_RESULTS}/{RUN_PATH}/D/{i + 1:04d}___disparity_fake.png",
+                #
                 f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}___real_sample.png",
                 f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}___real_sample.png",
                 f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}___fake_sample_MSE{mse_loss_A:.3f}.png",
@@ -200,6 +239,60 @@ def test(
             vutils.save_image(fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
             vutils.save_image(fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
 
+            """ Convert to disparity maps """
+
+            def __convert_disparty(image_np, path) -> np.ndarray:
+
+                vmin = image_np.min()
+                vmax = np.percentile(image_np, 100)
+
+                # cmaps = [ 'viridis', 'plasma', 'inferno', 'magma', 'cividis']
+
+                # Normalize using the provided cmap
+                normalizer = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+                mapper = cm.ScalarMappable(norm=normalizer, cmap="magma")
+                colormapped_im = (mapper.to_rgba(image_np)[:, :, :3] * 255).astype(np.uint8)
+
+                # Convert numpy array to PIL
+                image_target = PIL.fromarray(colormapped_im)
+
+                # Save
+                image_target.save(path)
+
+                return image_target
+
+            # Convert images to numpy array
+            np_image_real_A = real_image_B.squeeze().cpu().numpy()
+            np_image_fake_B = real_image_B.squeeze().cpu().numpy()
+
+            # Convert to disparity and save to path
+            disparity_image_real: np.ndarray = __convert_disparty(np_image_real_A, filepath_disparity_real)
+            disparity_image_fake: np.ndarray = __convert_disparty(np_image_fake_B, filepath_disparity_fake)
+
+            disparity_image_real.show()
+            disparity_image_fake.show()
+
+            """ Bilateral filter """
+
+            def __bilateral_filter(image) -> np.ndarray:
+
+                open_cv_image = np.array(image)
+                open_cv_image = open_cv_image[:, :, ::-1].copy()
+
+                bilateral_image = cv2.bilateralFilter(open_cv_image, 9, 75, 75)
+
+                return PIL.fromarray(bilateral_image)
+
+            # # Run a bilateral filter over the images
+            # bilateral_image_real: np.ndarray = __bilateral_filter(np_image_real_A)
+            # bilateral_image_fake: np.ndarray = __bilateral_filter(np_image_fake_B)
+
+            # # Show
+            # bilateral_image_real.show()
+            # bilateral_image_fake.show()
+
+            """ Progress bar """
+
             # Print a progress bar in terminal
             progress_bar.set_description(f"Process images {i + 1} of {len(loader)}")
 
@@ -219,3 +312,37 @@ def test(
 
     # </end> def test():
     pass
+
+
+# Execute main code
+if __name__ == "__main__":
+
+    try:
+
+        mydataloader = MyDataLoader()
+
+        s2d_dataset_test_RGB_DISPARITY = mydataloader.get_dataset(
+            "s2d", "Test_Set_RGB_DISPARITY", "test", (164, 276), 1, False
+        )
+
+        test(
+            parameters=PARAMETERS,
+            dataset=s2d_dataset_test_RGB_DISPARITY,
+            channels=1,
+            #
+            dataset_group="s2d",
+            dataset_name="Test_Set_RGB_DISPARITY",
+            model_date="2021-04-28",
+            model_name="11.51.48___EP100_DE050_LR0.0002_CH1",
+            #
+            model_netG_A2B=f"net_G_A2B.pth",
+            model_netG_B2A=f"net_G_B2A.pth",
+        )
+
+        pass
+
+    except KeyboardInterrupt:
+        try:
+            sys.exit(0)
+        except SystemExit:
+            os._exit(0)

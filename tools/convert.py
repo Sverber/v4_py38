@@ -134,6 +134,8 @@ def transform_GRAYSCALE2DISPARITY(
             if save:
                 image_target.save(path)
 
+            continue
+
             # if show_samples and i == 1:
             #     image_target.show()
 
@@ -143,28 +145,28 @@ def transform_GRAYSCALE2DISPARITY(
 
             """ Bilateral filter """
 
-            def __bilateral_filter(image):
+            # def __bilateral_filter(image):
 
-                open_cv_image = np.array(image_target)
-                open_cv_image = open_cv_image[:, :, ::-1].copy()
+            #     open_cv_image = np.array(image_target)
+            #     open_cv_image = open_cv_image[:, :, ::-1].copy()
 
-                return cv2.bilateralFilter(open_cv_image, 9, 75, 75)
+            #     return cv2.bilateralFilter(open_cv_image, 9, 75, 75)
 
-            image_target_bilateral = __bilateral_filter(image_target)
+            # image_target_bilateral = __bilateral_filter(image_target)
 
-            image_target_bilateral_PIL = PIL.fromarray(image_target_bilateral)
+            # image_target_bilateral_PIL = PIL.fromarray(image_target_bilateral)
 
-            # image_target_bf_pil.show()
+            # # image_target_bf_pil.show()
 
-            image_target_bilateral = __bilateral_filter(image_target)
+            # image_target_bilateral = __bilateral_filter(image_target)
 
-            # Show images
-            image_target.show()
-            image_target_bilateral.show()
+            # # Show images
+            # image_target.show()
+            # image_target_bilateral.show()
 
-            cv2.imshow("image_target_bf_pil", image_target_bf_pil)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
+            # cv2.imshow("image_target_bf_pil", image_target_bf_pil)
+            # cv2.waitKey(0)
+            # cv2.destroyAllWindows()
 
             def __concatenate(images):
 
@@ -187,11 +189,8 @@ def transform_GRAYSCALE2DISPARITY(
 
             # __concatenate([image_target, image_target_bilateral])
 
-            break
-
         else:
             print(f"{prefix} Image channels: {image_channels}, thus already in RGB format | Equality: {equality}")
-            break
 
 
 # Execute main code
@@ -202,7 +201,7 @@ if __name__ == "__main__":
         """ Transform grayscale to a RGB disparity map """
 
         # transform_GRAYSCALE2DISPARITY(os.path.join("dataset/s2d/Test_Set_RGB_DISPARITY/train/B" + "/*.*"), save=False)
-        transform_GRAYSCALE2DISPARITY(os.path.join("dataset/s2d/Test_Set_Original/test/B" + "/*.*"), save=False)
+        transform_GRAYSCALE2DISPARITY(os.path.join("dataset/s2d/Club_I/train/B" + "/*.*"), save=True)
 
         """ Transform RGB colours to their inverse """
 
