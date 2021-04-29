@@ -557,10 +557,10 @@ class RunCycleManager:
         else:
 
             # Error G_A (removed: self.loss_identity_A)
-            self.v__error_G_A = self.loss_GAN_A2B + self.loss_cycle_ABA
+            self.v__error_G_A = self.loss_GAN_A2B + self.loss_identity_A + self.loss_cycle_ABA
 
             # Error G_B (removed: self.loss_identity_B)
-            self.v__error_G_B = self.loss_GAN_B2A + self.loss_cycle_BAB
+            self.v__error_G_B = self.loss_GAN_B2A + self.loss_identity_B + self.loss_cycle_BAB
 
             # Cumulative and average error of G_A
             self.v__cum_error_G_A += self.v__error_G_A
@@ -1042,8 +1042,8 @@ class RunCycleManager:
         self.per_epoch_axes[1].set_title(f"Discriminator A and Discriminator B loss training")
 
         # Set labels
-        self.per_epoch_axes[0].set(xlabel="Batch", ylabel="G Loss")
-        self.per_epoch_axes[1].set(xlabel="Batch", ylabel="D Loss")
+        self.per_epoch_axes[0].set(xlabel="Epoch", ylabel="G Loss")
+        self.per_epoch_axes[1].set(xlabel="Epoch", ylabel="D Loss")
 
         # Add gridlines
         self.per_epoch_axes[0].grid()
