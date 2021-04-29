@@ -296,9 +296,9 @@ class MyDataLoader:
             square_size = (w, w)
 
         if square_size[0] % 4 == 0:
-            print("- Square image size is divisable by 4, ok. Continue")
+            print("- [MyDataLoader] | Square image size is divisable by 4, ok. Continue")
         else:
-            raise Exception(f"The square_size (image_size) is not divisable by 4! See: {square_size}")
+            raise Exception(f"- [MyDataLoader] | The square_size (image_size) is not divisable by 4! See: {square_size}")
 
         transforms_1d: transforms = transforms.Compose(
             [

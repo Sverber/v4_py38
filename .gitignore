@@ -2,7 +2,6 @@
 **/__pycache__
 **/.vscode  
 
-
 # Ignore all images to avoid uploading images accidently | Keep .jpg like this: !/results/*.jpg
 **/*.jpg
 **/*.png
@@ -20,5 +19,4 @@ weights/*
 !dataset/.gitkeep 
 !outputs/.gitkeep 
 !results/.gitkeep 
-!runs/.gitkeep
 !weights/.gitkeep 

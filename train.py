@@ -103,7 +103,8 @@ class RunCycleManager:
         self.net_D_A = None
         self.net_D_B = None
         self.loader = None
-        self.tb = None
+        self.validation_batch_index = None
+        self.batch_is_validation = False
 
         # Runs
         self.runs = self.__build_cycle(parameters)
@@ -172,9 +173,15 @@ class RunCycleManager:
                 dataset=self.dataset, batch_size=run.batch_size, num_workers=run.num_workers, shuffle=run.shuffle
             )
 
+            # Determine the batch-index from which the validation set starts
+            self.validation_batch_index: int = int(round(int(len(self.loader) * (1 - self.validation_percentage)), 0))
+
             # Keep track of the per-epoch losses
             self.losses_G_A, self.losses_G_B = [], []
             self.losses_D_A, self.losses_D_B = [], []
+
+            # Keep track of the per-epoch noise factor and learning rate
+            self.noise_factor_array = []
 
             """ Iterate over the epochs in the run """
 
@@ -204,7 +211,7 @@ class RunCycleManager:
 
                         """ Determine whether this batch is for training or validation """
 
-                        self.batch_is_validation = self.__is_batch_validation(i)
+                        self.batch_is_validation = True if i > self.validation_batch_index else False
 
                         """ Call the functions to train the GAN """
 
@@ -219,12 +226,6 @@ class RunCycleManager:
 
                         # Update discriminator networks
                         self.__update_discriminators(i)
-
-                        # # Regerate original input
-                        # __regenerate_inputs()
-
-                        # # Re-generate "original" input image by running both A2B and B2A through, respectively, B2A and A2B
-                        # __update_losses()
 
                         # Save the real-time output images for every {SHOW_IMG_FREQ} images
                         self.__save_realtime_output(i)
@@ -253,7 +254,7 @@ class RunCycleManager:
                 self.__save_end_epoch_output(epoch)
 
                 # Save some logs at the end of each epoch
-                self.__save_end_epoch_logs(epoch)
+                self.__save_end_epoch_logs(epoch, run)
 
                 # Save the losses in a plot of each epoch
                 self.__save_plot_per_epoch(epoch)
@@ -295,17 +296,6 @@ class RunCycleManager:
             torch.nn.init.zeros_(m.bias)
 
         pass
-
-    def __is_batch_validation(self, i) -> bool:
-
-        # Get the index from which the dataset is considered to be validation data
-        validation_at_index: int = int(len(self.loader) * (1 - self.validation_percentage)) - 1
-
-        # Determine whether this batch is a validation batch or not
-        if i > validation_at_index:
-            return True
-        else:
-            return False
 
     def __set_error_variables_to_zero(self) -> None:
 
@@ -354,7 +344,6 @@ class RunCycleManager:
                 [
                     "Epoch",
                     "Noise factor",
-                    "avg_error_D_A",
                     "avg_error_D_B",
                     "avg_error_G_A",
                     "avg_error_G_B",
@@ -376,7 +365,6 @@ class RunCycleManager:
             writer.writerow(
                 [
                     "Epoch",
-                    "Skip Disc.",
                     "error_D_A",
                     "error_D_B",
                     "error_G_A",
@@ -528,22 +516,24 @@ class RunCycleManager:
         self.recovered_image_B = self.net_G_A2B(self.fake_image_A)
         self.loss_cycle_BAB = self.cycle_loss(self.recovered_image_B, self.real_image_B) * lambda_B
 
+        """ Calculate the generator error """
+
+        # Error G_A (removed: self.loss_identity_A)
+        self.error_G_A = self.loss_GAN_A2B + self.loss_identity_A + self.loss_cycle_ABA
+
+        # Error G_B (removed: self.loss_identity_B)
+        self.error_G_B = self.loss_GAN_B2A + self.loss_identity_B + self.loss_cycle_BAB
+
+        # Average error on G_A
+        self.cum_error_G_A += self.error_G_A
+        self.avg_error_G_A = self.cum_error_G_A / (i + 1)
+
+        # Average error on G_B
+        self.cum_error_G_B += self.error_G_B
+        self.avg_error_G_B = self.cum_error_G_B / (i + 1)
+
         # Only update weights when using training data
         if self.batch_is_validation == False:
-
-            # Error G_A (removed: self.loss_identity_A)
-            self.error_G_A = self.loss_GAN_A2B + self.loss_identity_A + self.loss_cycle_ABA
-
-            # Error G_B (removed: self.loss_identity_B)
-            self.error_G_B = self.loss_GAN_B2A + self.loss_identity_B + self.loss_cycle_BAB
-
-            # Average error on G_A
-            self.cum_error_G_A += self.error_G_A
-            self.avg_error_G_A = self.cum_error_G_A / (i + 1)
-
-            # Average error on G_B
-            self.cum_error_G_B += self.error_G_B
-            self.avg_error_G_B = self.cum_error_G_B / (i + 1)
 
             # Calculate gradients for G_A and G_B
             self.error_G_A.backward()
@@ -552,23 +542,6 @@ class RunCycleManager:
             # Update the Generator networks
             self.optimizer_G_A2B.step()
             self.optimizer_G_B2A.step()
-
-        # Validate model on the validation data - do not update weights
-        else:
-
-            # Error G_A (removed: self.loss_identity_A)
-            self.v__error_G_A = self.loss_GAN_A2B + self.loss_identity_A + self.loss_cycle_ABA
-
-            # Error G_B (removed: self.loss_identity_B)
-            self.v__error_G_B = self.loss_GAN_B2A + self.loss_identity_B + self.loss_cycle_BAB
-
-            # Cumulative and average error of G_A
-            self.v__cum_error_G_A += self.v__error_G_A
-            self.v__avg_error_G_A = self.v__cum_error_G_A / (i + 1)
-
-            # Cumulative and average error of G_B
-            self.v__cum_error_G_B += self.v__error_G_B
-            self.v__avg_error_G_B = self.v__cum_error_G_B / (i + 1)
 
         pass
 
@@ -594,27 +567,18 @@ class RunCycleManager:
         # Combined loss and calculate gradients
         self.error_D_A = (self.error_D_real_A + self.error_D_fake_A) / 2
 
+        # Cumulative and average error of D_A
+        self.cum_error_D_A += self.error_D_A
+        self.avg_error_D_A = self.cum_error_D_A / (i + 1)
+
         # Only update weights when using training data
         if self.batch_is_validation == False:
-
-            # Cumulative and average error of D_A
-            self.cum_error_D_A += self.error_D_A
-            self.avg_error_D_A = self.cum_error_D_A / (i + 1)
 
             # Calculate gradients for D_A
             self.error_D_A.backward()
 
             # Update D_A weights
             self.optimizer_D_A.step()
-
-        # Validate model on the validation data - do not update weights
-        else:
-
-            # Cumulative and average error of D_A on the validation set
-            self.v__cum_error_D_A += self.error_D_A
-            self.v__avg_error_D_A = self.v__cum_error_D_A / (i + 1)
-
-            pass
 
         """" Update discriminator B """
 
@@ -636,12 +600,12 @@ class RunCycleManager:
         # Combined loss and calculate gradients
         self.error_D_B = (self.error_D_real_B + self.error_D_fake_B) / 2
 
+        # Cumulative and average error of D_A
+        self.cum_error_D_B += self.error_D_B
+        self.avg_error_D_B = self.cum_error_D_B / (i + 1)
+
         # Only update weights when using training data
         if self.batch_is_validation == False:
-
-            # Cumulative and average error of D_A
-            self.cum_error_D_B += self.error_D_B
-            self.avg_error_D_B = self.cum_error_D_B / (i + 1)
 
             # Calculate gradients for D_B
             self.error_D_B.backward()
@@ -649,14 +613,7 @@ class RunCycleManager:
             # Update D_B weights
             self.optimizer_D_B.step()
 
-        # Validate model on the validation data - do not update weights
-        else:
-
-            # Cumulative and average error of D_A on the validation set
-            self.v__cum_error_D_B += self.error_D_B
-            self.v__avg_error_D_B = self.v__cum_error_D_B / (i + 1)
-
-            pass
+        pass
 
     # Currently not used, due to CUDA memory issues
     def __regenerate_inputs(self) -> None:
@@ -830,38 +787,15 @@ class RunCycleManager:
 
     def __print_progress(self, i, epoch, run) -> None:
 
-        """ 
+        """ Print progress """
 
-            # L_D(A)                = Loss discriminator A
-            # L_D(B)                = Loss discriminator B
-            # L_G(A2B)              = Loss generator A2B
-            # L_G(B2A)              = Loss generator B2A
-            # L_G_ID                = Combined oentity loss generators A2B + B2A
-            # L_G_GAN               = Combined GAN loss generators A2B + B2A
-            # L_G_CYCLE             = Combined cycle consistency loss Generators A2B + B2A
-            # G(A2B)_MSE(avg)       = Mean square error (MSE) loss over the generated output B vs. the real image A
-            # G(B2A)_MSE(avg)       = Mean square error (MSE) loss over the generated output A vs. the real image B
-            # G(A2B2A)_MSE(avg)     = Average mean square error (MSE) loss over the generated original image A vs. the real image A
-            # G(B2A2B)_MSE(avg)     = Average mean square error (MSE) loss over the generated original image B vs. the real image B
-
-        """
-
-        if self.batch_is_validation == True:
-            self.progress_bar.set_description(
-                f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}] [val={self.batch_is_validation}] [nf={self.noise_factor:.3f}]  ||  "
-                f"v__avg_error_D_A: {self.v__avg_error_D_A:.3f} ; "
-                f"v__avg_error_D_B: {self.v__avg_error_D_B:.3f}  ||  "
-                f"v__avg_error_G_A2B: {self.v__avg_error_G_A:.3f} ; "
-                f"v__avg_error_G_B2A: {self.v__avg_error_G_B:.3f}  ||  "
-            )
-        else:
-            self.progress_bar.set_description(
-                f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}] [val={self.batch_is_validation}] [nf={self.noise_factor:.3f}]  ||  "
-                f"avg_error_D_A: {self.avg_error_D_A:.3f} ; "
-                f"avg_error_D_B: {self.avg_error_D_B:.3f}  ||  "
-                f"avg_error_G_A2B: {self.avg_error_G_A:.3f} ; "
-                f"avg_error_G_B2A: {self.avg_error_G_B:.3f}  ||  "
-            )
+        self.progress_bar.set_description(
+            f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}][val={self.batch_is_validation}][val_index={self.validation_batch_index}][nf={self.noise_factor:.3f}]  ||  "
+            f"avg_error_D_A: {self.avg_error_D_A:.3f} ; "
+            f"avg_error_D_B: {self.avg_error_D_B:.3f}  ||  "
+            f"avg_error_G_A2B: {self.avg_error_G_A:.3f} ; "
+            f"avg_error_G_B2A: {self.avg_error_G_B:.3f}  ||  "
+        )
 
         pass
 
@@ -886,8 +820,6 @@ class RunCycleManager:
             filepath_fake_B,
             filepath_fake_A_noise,
             filepath_fake_B_noise,
-            # filepath_f_or_A,
-            # filepath_f_or_B,
         ) = (
             f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___real_sample.png",
             f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___real_sample.png",
@@ -897,8 +829,6 @@ class RunCycleManager:
             f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___fake_sample.png",
             f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___fake_sample_noise.png",
             f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___fake_sample_noise.png",
-            # f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___fake_original_MSE{self.avg_mse_loss_A:.3f}.png",
-            # f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___fake_original_MSE{self.avg_mse_loss_B:.3f}.png",
         )
 
         # Save real input images
@@ -917,10 +847,6 @@ class RunCycleManager:
         vutils.save_image(self.fake_image_A_noise.detach(), filepath_fake_A_noise, normalize=True)
         vutils.save_image(self.fake_image_B_noise.detach(), filepath_fake_B_noise, normalize=True)
 
-        # # Save the generated (fake) original images
-        # vutils.save_image(self.fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
-        # vutils.save_image(self.fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
-
         # Check point dir
         model_weights_dir = f"{self.DIR_WEIGHTS}/{self.RUN_PATH}"
 
@@ -932,16 +858,14 @@ class RunCycleManager:
 
         pass
 
-        # Save the network weights at the end of the epoch
-
-    def __save_end_epoch_logs(self, epoch) -> None:
+    def __save_end_epoch_logs(self, epoch, run) -> None:
 
         with open(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/logs.csv", "a+", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(
                 [
                     epoch,
-                    self.noise_factor,
+                    f"{self.noise_factor:.3f}",
                     f"{self.avg_error_D_A:.5f}",
                     f"{self.avg_error_D_B:.5f}",
                     f"{self.avg_error_G_A:.5f}",
@@ -989,25 +913,9 @@ class RunCycleManager:
             self.per_batch_axes[0].plot(self.batch_losses_G_A, label="G_A", color="tab:blue")
             self.per_batch_axes[0].plot(self.batch_losses_G_B, label="G_B", color="tab:orange")
 
-            # # Fill between generator values
-            # self.per_batch_axes[0].fill_between(
-            #     x=np.arange(i + 1), y1=0, y2=self.batch_losses_G_A, facecolor="tab:blue", alpha=0.5
-            # )
-            # self.per_batch_axes[0].fill_between(
-            #     x=np.arange(i + 1), y1=0, y2=self.batch_losses_G_B, facecolor="tab:orange", alpha=0.5
-            # )
-
             # Plot discriminator values
             self.per_batch_axes[1].plot(self.batch_losses_D_A, label="D_A", color="tab:blue")
             self.per_batch_axes[1].plot(self.batch_losses_D_B, label="D_B", color="tab:orange")
-
-            # # Fill between discriminator values
-            # self.per_batch_axes[1].fill_between(
-            #     np.arange(i + 1), 0, self.batch_losses_D_A, facecolor="tab:blue", alpha=0.5
-            # )
-            # self.per_batch_axes[1].fill_between(
-            #     np.arange(i + 1), 0, self.batch_losses_D_B, facecolor="tab:orange", alpha=0.5
-            # )
 
             # Add legends
             self.per_batch_axes[0].legend(loc="upper right", frameon=True).get_frame()
@@ -1032,50 +940,48 @@ class RunCycleManager:
         self.losses_D_A.append(self.avg_error_D_A.cpu().detach().numpy())
         self.losses_D_B.append(self.avg_error_D_B.cpu().detach().numpy())
 
+        self.noise_factor_array.append(self.noise_factor)
+
         """ Plot losses """
 
         # Create figure
-        self.per_epoch_figure, self.per_epoch_axes = plt.subplots(2)
+        self.per_epoch_figure, self.per_epoch_axes = plt.subplots(3)
 
         # Set titles
         self.per_epoch_axes[0].set_title(f"Generator A and Generator B loss during training")
         self.per_epoch_axes[1].set_title(f"Discriminator A and Discriminator B loss training")
+        self.per_epoch_axes[2].set_title(f"Decaying noise factor during training")
 
         # Set labels
         self.per_epoch_axes[0].set(xlabel="Epoch", ylabel="G Loss")
         self.per_epoch_axes[1].set(xlabel="Epoch", ylabel="D Loss")
+        self.per_epoch_axes[2].set(xlabel="Epoch", ylabel="Noise factor")
 
         # Add gridlines
         self.per_epoch_axes[0].grid()
         self.per_epoch_axes[1].grid()
+        self.per_epoch_axes[2].grid()
 
         # Plot generator values
         self.per_epoch_axes[0].plot(self.losses_G_A, label="G_A", color="tab:blue")
         self.per_epoch_axes[0].plot(self.losses_G_B, label="G_B", color="tab:orange")
 
-        # # Fill between generator values
-        # self.per_epoch_axes[0].fill_between(
-        #     x=np.arange(epoch + 1), y1=0, y2=self.losses_G_A, facecolor="tab:blue", alpha=0.5
-        # )
-        # self.per_epoch_axes[0].fill_between(
-        #     x=np.arange(epoch + 1), y1=0, y2=self.losses_G_B, facecolor="tab:orange", alpha=0.5
-        # )
-
         # Plot discriminator values
         self.per_epoch_axes[1].plot(self.losses_D_A, label="D_A", color="tab:blue")
         self.per_epoch_axes[1].plot(self.losses_D_B, label="D_B", color="tab:orange")
 
-        # # Fill between discriminator values
-        # self.per_epoch_axes[1].fill_between(
-        #     x=np.arange(epoch + 1), y1=0, y2=self.losses_D_A, facecolor="tab:blue", alpha=0.5
-        # )
-        # self.per_epoch_axes[1].fill_between(
-        #     x=np.arange(epoch + 1), y1=0, y2=self.losses_D_B, facecolor="tab:orange", alpha=0.5
-        # )
+        # Plot noise factor values
+        self.per_epoch_axes[2].plot(self.noise_factor_array, label="Noise factor", color="tab:red")
+
+        # Fill between noise factor values
+        self.per_epoch_axes[2].fill_between(
+            x=np.arange(epoch + 1), y1=0, y2=self.noise_factor_array, facecolor="tab:red", alpha=0.5
+        )
 
         # Add legends
         self.per_epoch_axes[0].legend(loc="upper right", frameon=True).get_frame()
         self.per_epoch_axes[1].legend(loc="upper right", frameon=True).get_frame()
+        self.per_epoch_axes[2].legend(loc="upper right", frameon=True).get_frame()
 
         # Adjust layout and save
         self.per_epoch_figure.tight_layout(h_pad=2.0, w_pad=0.0)
@@ -1086,6 +992,9 @@ class RunCycleManager:
         plt.close("all")
 
         pass
+
+
+    """ Static methods """
 
     @staticmethod
     def makedirs(path: str, dir: str):
@@ -1179,9 +1088,15 @@ if __name__ == "__main__":
 
         """ _____________ """
 
-        s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (68, 120), 1, False)
-        s2d_manager_RGB = RunCycleManager(s2d_dataset_train_RGB, 1, PARAMETERS)
-        s2d_manager_RGB.start_cycle()
+        # s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (68, 120), 1, False)
+        # s2d_manager_RGB = RunCycleManager(s2d_dataset_train_RGB, 1, PARAMETERS)
+        # s2d_manager_RGB.start_cycle()
+
+        """ _____________ """
+
+        s2d_dataset_train = mydataloader.get_dataset("s2d", "DrivingStereoDemo", "train", (88, 40), 1, False)
+        s2d_manager = RunCycleManager(s2d_dataset_train, 1, PARAMETERS)
+        s2d_manager.start_cycle()
 
     except KeyboardInterrupt:
         try:

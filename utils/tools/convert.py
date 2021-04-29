@@ -201,7 +201,8 @@ if __name__ == "__main__":
         """ Transform grayscale to a RGB disparity map """
 
         # transform_GRAYSCALE2DISPARITY(os.path.join("dataset/s2d/Test_Set_RGB_DISPARITY/train/B" + "/*.*"), save=False)
-        transform_GRAYSCALE2DISPARITY(os.path.join("dataset/s2d/Club_I/train/B" + "/*.*"), save=True)
+        transform_GRAYSCALE2DISPARITY(os.path.join("dataset/s2d/DrivingStereoDemo/train/B" + "/*.*"), save=True)
+        transform_GRAYSCALE2DISPARITY(os.path.join("dataset/s2d/DrivingStereoDemo/test/B" + "/*.*"), save=True)
 
         """ Transform RGB colours to their inverse """
 

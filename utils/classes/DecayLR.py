@@ -7,5 +7,8 @@ class DecayLR:
         self.offset = offset
         self.decay_epochs = decay_epochs
 
+    def __call__(self, epoch) -> float:
+        return 1.0 - max(0, epoch + self.offset - self.decay_epochs) / (self.epochs - self.decay_epochs)
+
     def step(self, epoch):
         return 1.0 - max(0, epoch + self.offset - self.decay_epochs) / (self.epochs - self.decay_epochs)
