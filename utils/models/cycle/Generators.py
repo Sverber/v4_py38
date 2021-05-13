@@ -5,7 +5,7 @@ from .ResidualBlock import ResidualBlock
 
 class Generator(nn.Module):
 
-    """ Insert documentation """
+    """ Generator network of the GAN """
 
     def __init__(self, in_channels: int, out_channels: int):
 
@@ -18,7 +18,7 @@ class Generator(nn.Module):
 
         """
 
-        Can solve checkerboard artifact issue by switching from deconvolution to nearest-neighbor upsampling
+        Can solve checkerboard artifact issue by switching from ConvTranspose2d to nearest-neighbor upsampling
         
         from:
 
@@ -75,18 +75,25 @@ class Generator(nn.Module):
             #
             # Upsampling
             #
-            nn.ConvTranspose2d(
-                in_channels=256, out_channels=128, kernel_size=(3, 3), stride=2, padding=1, output_padding=1
-            ),
+            # nn.ConvTranspose2d(
+            #     in_channels=256, out_channels=128, kernel_size=(3, 3), stride=2, padding=1, output_padding=1
+            # ),
+            nn.Upsample(scale_factor = 2, mode='bilinear'),                     # line 1 of 3 of nearest neighbour upsampling instead of ConvTranspose2d
+            nn.ReflectionPad2d(1),                                              # line 2 of 3 of nearest neighbour upsampling instead of ConvTranspose2d
+            nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=0),            # line 3 of 3 of nearest neighbour upsampling instead of ConvTranspose2d
             nn.InstanceNorm2d(num_features=128),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
             nn.Dropout2d(self.dropout2d),
             #
             # Upsampling
             #
-            nn.ConvTranspose2d(
-                in_channels=128, out_channels=64, kernel_size=(3, 3), stride=2, padding=1, output_padding=1
-            ),
+            # nn.ConvTranspose2d(
+            #     in_channels=128, out_channels=64, kernel_size=(3, 3), stride=2, padding=1, output_padding=1
+            # ),
+            #
+            nn.Upsample(scale_factor = 2, mode='bilinear', align_corners=True), # line 1 of 3 of nearest neighbour upsampling instead of ConvTranspose2d
+            nn.ReflectionPad2d(1),                                              # line 2 of 3 of nearest neighbour upsampling instead of ConvTranspose2d
+            nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=0),             # line 3 of 3 of nearest neighbour upsampling instead of ConvTranspose2d
             nn.InstanceNorm2d(num_features=64),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
             nn.Dropout2d(self.dropout2d),
@@ -107,7 +114,7 @@ class Generator(nn.Module):
 
 class __Generator(nn.Module):
 
-    """ Insert documentation """
+    """ Original Generator network that is used in the CycleGAN """
 
     def __init__(self, in_channels: int, out_channels: int):
 

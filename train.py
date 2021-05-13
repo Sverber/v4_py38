@@ -1154,7 +1154,7 @@ PARAMETERS: OrderedDict = OrderedDict(
     manualSeed=[999],
     learning_rate=[0.0002],
     batch_size=[1],
-    num_epochs=[200],
+    num_epochs=[300],
     decay_epochs=[100],
 )
 

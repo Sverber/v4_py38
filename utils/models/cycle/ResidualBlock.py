@@ -3,6 +3,9 @@ import torch.nn as nn
 
 
 class ResidualBlock(nn.Module):
+
+    """ Residual blocks, also known as skip connections, these are used in the Generator network """ 
+
     def __init__(self, in_channels):
         super(ResidualBlock, self).__init__()
 

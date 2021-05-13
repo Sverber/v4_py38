@@ -2,7 +2,6 @@
 from __future__ import absolute_import, division, print_function
 
 import os
-import cv2
 import sys
 import numpy as np
 import PIL.Image as PIL
@@ -26,8 +25,6 @@ from torch.utils.data.dataloader import DataLoader
 
 from utils.classes.dataloaders import MyDataLoader
 from utils.classes.RunCycleBuilder import RunCycleBuilder
-from utils.classes.RunCycleManager import RunCycleManager
-from utils.classes.StereoDisparityDataset import StereoDisparityDataset
 from utils.models.cycle.Generators import Generator
 
 
@@ -199,7 +196,7 @@ def test(
 
                 # the 'Mean Squared Error' between the two images is the
                 # sum of the squared difference between the two images;
-                # NOTE: the two images must have the same dimension
+                # note: the two images must have the same dimension
 
                 error = np.sum((image_A.astype("float") - image_B.astype("float")) ** 2)
                 error /= float(image_A.shape[0] * image_A.shape[1])
@@ -230,7 +227,7 @@ def test(
             avg_mse_loss_A = cum_mse_loss_A / (i + 1)
             avg_mse_loss_B = cum_mse_loss_B / (i + 1)
 
-            """ (1) Calculate losses for the generated (fake) original images """
+            """ Calculate losses for the generated (fake) original images """
 
             # Calculate the mean square error (MSE) for the generated (fake) originals A and B
             mse_loss_f_or_A = mse_loss(fake_original_image_A, real_image_A)
@@ -244,7 +241,7 @@ def test(
             avg_mse_loss_f_or_A = cum_mse_loss_f_or_A / (i + 1)
             avg_mse_loss_f_or_B = cum_mse_loss_f_or_B / (i + 1)
 
-            """ (1) Define filepaths, save generated output and print a progress bar """
+            """ Define filepaths, save generated output and print a progress bar """
 
             # Filepath and filename for the real and generated output images
             (
