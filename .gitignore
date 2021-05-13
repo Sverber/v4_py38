@@ -9,6 +9,8 @@
 # Allow images in root folder
 !/*.png  
 
+results_synthesis_test/*
+
 # Ignore dataset folders directories content
 dataset/*
 outputs/*

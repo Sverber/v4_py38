@@ -109,7 +109,7 @@ class RunTrainManager:
         # Runs
         self.runs = self.__build_cycle(parameters)
 
-    """ [ Public function ] Starts the training loop """
+    """ [ Public ] Starts the training loop """
 
     def start_cycle(self,) -> None:
 
@@ -123,6 +123,7 @@ class RunTrainManager:
             random.seed(run.manualSeed)
             torch.manual_seed(run.manualSeed)
 
+            # Create the directory path for this run 
             self.RUN_PATH = self.get_run_path(run, self.dataset.name, self.channels)
 
             # Make required directories for storing the training output
@@ -227,7 +228,7 @@ class RunTrainManager:
                     self.__update_generators(i)
 
                     # Add noise to the discriminator input
-                    self.__add_discriminator_noise(epoch, run)
+                    self.__add_discriminator_noise(run, epoch)
 
                     # Update discriminator networks
                     self.__update_discriminators(i)
@@ -245,7 +246,7 @@ class RunTrainManager:
                     self.__save_plot_per_batch(i, epoch)
 
                     # Print a progress bar in the terminal
-                    self.__print_progress(i, epoch, run)
+                    self.__print_progress(run, i, epoch)
 
                 """ Call the end-of-epoch functions """
 
@@ -275,6 +276,8 @@ class RunTrainManager:
 
     def __build_cycle(self, parameters) -> list:
 
+        """ Create a list of runs using all configured parameter combinations """
+
         run = namedtuple("Run", parameters.keys())
 
         self.runs = []
@@ -288,7 +291,7 @@ class RunTrainManager:
 
     def __initialize_weights(self, m):
 
-        """ Custom weights initialization called on net_G and net_D """
+        """ Custom weights initialization called on a Generator or Discriminator network """
 
         classname = m.__class__.__name__
 
@@ -416,26 +419,28 @@ class RunTrainManager:
 
     def __read_data(self, run, data) -> None:
 
-        # Get image A and image B
+        """ Read a left-to-right dataset or a stereo-to-disparity dataset """
+
+        # Get image A and image B from a l2r dataset
         if self.dataset_group == "l2r":
             self.real_image_A = data["left"].to(run.device)
             self.real_image_B = data["right"].to(run.device)
 
+        # Get image A and B from a s2d dataset
         elif self.dataset_group == "s2d":
             real_image_A_left = data["A_left"].to(run.device)
             real_image_A_right = data["A_right"].to(run.device)
             real_image_B = data["B"].to(run.device)
 
+            # Store the images non-locally to access it elsewhere
             self.real_image_A_left = real_image_A_left
             self.real_image_A_right = real_image_A_right
             self.real_image_B = real_image_B
 
-            # Concatenate left- and right view into one stereo image
-            # self.real_image_A = torch.cat((real_image_A_left, real_image_A_right), dim=-1)
-
-            # Add the left- and right into one image and normalize again
+            # Add the left- and right into one image (image A)
             self.real_image_A = torch.add(real_image_A_left, real_image_A_right)
 
+            # Normalize again
             if self.channels == 1:
                 transforms.Normalize(mean=(0.5), std=(0.5))(self.real_image_A)
             elif self.channels == 3:
@@ -450,7 +455,7 @@ class RunTrainManager:
 
         pass
 
-    def __add_discriminator_noise(self, epoch, run) -> None:
+    def __add_discriminator_noise(self, run, epoch: int) -> None:
 
         """ Add decaying Gaussian noise to discriminator A and B real/fake inputs """
 
@@ -502,7 +507,7 @@ class RunTrainManager:
 
     """ [ Private ] Functions to update the networks """
 
-    def __update_generators(self, i) -> None:
+    def __update_generators(self, i: int) -> None:
 
         """ Update Generator networks: A2B and B2A """
 
@@ -513,14 +518,14 @@ class RunTrainManager:
             self.optimizer_G_A2B.zero_grad()
             self.optimizer_G_B2A.zero_grad()
 
-        """ Generator loss """
+        """ Generator losses """
 
-        # GAN loss: D_A(G_B2A(A))
-        self.generated_image_B2A = self.net_G_B2A(self.real_image_A)
+        # GAN loss: D_A(G_B2A(B))
+        self.generated_image_B2A = self.net_G_B2A(self.real_image_B)
         self.generated_output_A = self.net_D_A(self.generated_image_B2A)
         self.loss_GAN_B2A = self.adversarial_loss(self.generated_output_A, self.real_label)
 
-        # GAN loss: D_B(G_B(B))
+        # GAN loss: D_B(G_A2B(A))
         self.generated_image_A2B = self.net_G_A2B(self.real_image_A)
         self.generated_output_B = self.net_D_B(self.generated_image_A2B)
         self.loss_GAN_A2B = self.adversarial_loss(self.generated_output_B, self.real_label)
@@ -531,7 +536,13 @@ class RunTrainManager:
         lambda_B2A = 10  # 10 by default
         lamba_identity = 0.0  # 0.5 by default, set to 0.0 because colour preservation is not important
 
-        # G_B2A should be fed the real A, to
+        # Lambda identity loss should not be used for s2d datasets (colour shouldn't be preseved in the result)
+        if self.dataset_group == "s2d":
+            lamba_identity = 0.0
+        elif self.dataset_group == "l2r":
+            lamba_identity = 0.5
+
+        # G_B2A should be fed the real A
         self.identity_image_B2A = self.net_G_B2A(self.real_image_A)
         self.loss_identity_B2A = (
             self.identity_loss(self.identity_image_B2A, self.real_image_A) * lambda_B2A * lamba_identity
@@ -543,7 +554,7 @@ class RunTrainManager:
             self.identity_loss(self.identity_image_A2B, self.real_image_B) * lambda_A2B * lamba_identity
         )
 
-        """ Cycle loss, so: A -> B -> A and B -> A -> B """
+        """ Cycle loss, re-generates the original input image. So: A -> B -> A and B -> A -> B """
 
         # Cycle loss: A -> B -> A
         self.recovered_image_A = self.net_G_B2A(self.generated_image_A2B)
@@ -555,22 +566,22 @@ class RunTrainManager:
 
         """ Calculate the generator errors """
 
-        # Error G_A (removed: self.loss_identity_A2B)
-        self.error_G_A2B = self.loss_GAN_A2B + self.loss_identity_A2B + self.loss_cycle_ABA
-
-        # Error G_B (removed: self.loss_identity_B2A)
-        self.error_G_B2A = self.loss_GAN_B2A + self.loss_identity_B2A + self.loss_cycle_BAB
-
-        # Average error on G_A2B
-        self.cum_error_G_A2B += self.error_G_A2B
-        self.avg_error_G_A2B = self.cum_error_G_A2B / (i + 1)
-
-        # Average error on G_B2A
-        self.cum_error_G_B2A += self.error_G_B2A
-        self.avg_error_G_B2A = self.cum_error_G_B2A / (i + 1)
-
         # Only update weights when using training data
         if self.batch_is_validation == False:
+                
+            # Error G_A2B
+            self.error_G_A2B = self.loss_GAN_A2B + self.loss_identity_A2B + self.loss_cycle_ABA
+
+            # Error G_B2A
+            self.error_G_B2A = self.loss_GAN_B2A + self.loss_identity_B2A + self.loss_cycle_BAB
+
+            # Average error on G_A2B
+            self.cum_error_G_A2B += self.error_G_A2B
+            self.avg_error_G_A2B = self.cum_error_G_A2B / (i + 1)
+
+            # Average error on G_B2A
+            self.cum_error_G_B2A += self.error_G_B2A
+            self.avg_error_G_B2A = self.cum_error_G_B2A / (i + 1)
 
             # Calculate gradients for G_A and G_B
             self.error_G_A2B.backward()
@@ -580,9 +591,25 @@ class RunTrainManager:
             self.optimizer_G_A2B.step()
             self.optimizer_G_B2A.step()
 
+        else:
+
+            # Validation error G_A2B 
+            self.v__error_G_A2B = self.loss_GAN_A2B + self.loss_identity_A2B + self.loss_cycle_ABA
+
+            # Validation error G_B2A
+            self.v__error_G_B2A = self.loss_GAN_B2A + self.loss_identity_B2A + self.loss_cycle_BAB
+
+            # Average validation error on G_A2B
+            self.v__cum_error_G_A2B += self.v__error_G_A2B
+            self.v__avg_error_G_A2B = self.v__cum_error_G_A2B / (i + 1)
+
+            # Average validation error on G_B2A
+            self.v__cum_error_G_B2A += self.v__error_G_B2A
+            self.v__avg_error_G_B2A = self.v__cum_error_G_B2A / (i + 1)
+
         pass
 
-    def __update_discriminators(self, i) -> None:
+    def __update_discriminators(self, i: int) -> None:
 
         """" Update discriminator A """
 
@@ -601,21 +628,30 @@ class RunTrainManager:
         self.generated_output_A = self.net_D_A(self.generated_image_B2A_noise.detach())
         self.error_D_fake_A = self.adversarial_loss(self.generated_output_A, self.fake_smooth_label)
 
-        # Combined loss and calculate gradients
-        self.error_D_A = (self.error_D_real_A + self.error_D_fake_A) / 2
-
-        # Cumulative and average error of D_A
-        self.cum_error_D_A += self.error_D_A
-        self.avg_error_D_A = self.cum_error_D_A / (i + 1)
-
         # Only update weights when using training data
         if self.batch_is_validation == False:
+
+            # Combined loss and calculate gradients
+            self.error_D_A = (self.error_D_real_A + self.error_D_fake_A) / 2
+
+            # Cumulative and average error of D_A
+            self.cum_error_D_A += self.error_D_A
+            self.avg_error_D_A = self.cum_error_D_A / (i + 1)
 
             # Calculate gradients for D_A
             self.error_D_A.backward()
 
             # Update D_A weights
             self.optimizer_D_A.step()
+
+        else:
+            
+            # Combined loss and calculate gradients
+            self.v__error_D_A = (self.error_D_real_A + self.error_D_fake_A) / 2
+
+            # Cumulative and average validation error of D_A
+            self.v__cum_error_D_A += self.v__error_D_A
+            self.v__avg_error_D_A = self.v__cum_error_D_A / (i + 1)
 
         """" Update discriminator B """
 
@@ -634,15 +670,16 @@ class RunTrainManager:
         self.generated_output_B = self.net_D_B(self.generated_image_A2B_noise.detach())
         self.error_D_fake_B = self.adversarial_loss(self.generated_output_B, self.fake_smooth_label)
 
-        # Combined loss and calculate gradients
-        self.error_D_B = (self.error_D_real_B + self.error_D_fake_B) / 2
-
-        # Cumulative and average error of D_A
-        self.cum_error_D_B += self.error_D_B
-        self.avg_error_D_B = self.cum_error_D_B / (i + 1)
 
         # Only update weights when using training data
         if self.batch_is_validation == False:
+
+            # Combined loss and calculate gradients
+            self.error_D_B = (self.error_D_real_B + self.error_D_fake_B) / 2
+
+            # Cumulative and average error of D_A
+            self.cum_error_D_B += self.error_D_B
+            self.avg_error_D_B = self.cum_error_D_B / (i + 1)
 
             # Calculate gradients for D_B
             self.error_D_B.backward()
@@ -650,11 +687,20 @@ class RunTrainManager:
             # Update D_B weights
             self.optimizer_D_B.step()
 
+        else:
+
+            # Combined validation loss and calculate gradients
+            self.v__error_D_B = (self.error_D_real_B + self.error_D_fake_B) / 2
+
+            # Cumulative and average validation error of D_B
+            self.v__cum_error_D_B += self.v__error_D_B
+            self.v__avg_error_D_B = self.v__cum_error_D_B / (i + 1)
+
         pass
 
-    def __update_mse_loss(self, i) -> None:
+    def __update_mse_loss(self, i: int) -> None:
 
-        """ Calculate a cumulative MSE loss and  """
+        """ Calculate a per-batch, cumulative and average MSE loss of the generated outputs of generators A2B and B2A """
 
         # # Initiate a mean square error (MSE) loss function
         mse_loss = nn.MSELoss()
@@ -675,6 +721,8 @@ class RunTrainManager:
 
     def __update_learning_rate(self) -> None:
 
+        """ Update the learning rate of each network """
+
         self.lr_scheduler_G_A2B.step()
         self.lr_scheduler_G_B2A.step()
         self.lr_scheduler_D_A.step()
@@ -682,26 +730,41 @@ class RunTrainManager:
 
     """ [ Private ] Functions to print-, save- and plot """
 
-    def __print_progress(self, i, epoch, run) -> None:
+    def __print_progress(self, run, i: int, epoch: int) -> None:
 
         """ Print progress """
 
-        self.progress_bar.set_description(
-            # f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}][val={self.batch_is_validation}][val_index={self.validation_batch_index}][nf={self.noise_factor:.3f}]  ||  "
-            f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}][nf={self.noise_factor:.3f}]  ||  "
-            f"avg_error_D_A: {self.avg_error_D_A:.3f} ; "
-            f"avg_error_D_B: {self.avg_error_D_B:.3f}  || "
-            f"avg_error_G_A2B: {self.avg_error_G_A2B:.3f} ; "
-            f"avg_error_G_B2A: {self.avg_error_G_B2A:.3f} || "
-            f"avg_MSE_loss_A: {self.avg_mse_loss_generated_A:.3f} "
-            f"avg_MSE_loss_B: {self.avg_mse_loss_generated_B:.3f} || "
-        )
+        # Print correct output if the current batch is used for training
+        if self.batch_is_validation == False:
+
+            self.progress_bar.set_description(
+                f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}][nf={self.noise_factor:.3f}]  ||  "
+                f"avg_error_D_A: {self.avg_error_D_A:.3f} ; "
+                f"avg_error_D_B: {self.avg_error_D_B:.3f}  || "
+                f"avg_error_G_A2B: {self.avg_error_G_A2B:.3f} ; "
+                f"avg_error_G_B2A: {self.avg_error_G_B2A:.3f} || "
+                f"avg_MSE_loss_A: {self.avg_mse_loss_generated_A:.3f} "
+                f"avg_MSE_loss_B: {self.avg_mse_loss_generated_B:.3f} || "
+            )
+
+        # Print correct output if the current batch is used for validation
+        else:
+
+            self.progress_bar.set_description(
+                f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}][nf={self.noise_factor:.3f}]  ||  "
+                f"v__avg_error_D_A: {self.v__avg_error_D_A:.3f} ; "
+                f"v__avg_error_D_B: {self.v__avg_error_D_B:.3f}  || "
+                f"v__avg_error_G_A2B: {self.v__avg_error_G_A2B:.3f} ; "
+                f"v__avg_error_G_B2A: {self.v__avg_error_G_B2A:.3f} || "
+                # f"v__avg_MSE_loss_A: {self.v__avg_mse_loss_generated_A:.3f} "
+                # f"v__avg_MSE_loss_B: {self.v__avg_mse_loss_generated_B:.3f} || "
+            )
 
         pass
 
-    def __save_realtime_output(self, i) -> None:
+    def __save_realtime_output(self, i: int) -> None:
 
-        """ (5) Save all generated network output and """
+        """ Save used data and network outputs, real-time as a png image (useful for visualization during training) """
 
         if i % self.SHOW_IMAGE_FREQ == 0:
 
@@ -809,6 +872,8 @@ class RunTrainManager:
 
     def __save_per_epoch_logs(self, epoch: int) -> None:
 
+        """ Stores the current errors and losses as a newline to the previously created .csv file """
+
         # Create csv for the logs file of this run
         with open(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/logs/EP{epoch}__logs.csv", "a+", newline="") as file:
             writer = csv.writer(file)
@@ -836,6 +901,8 @@ class RunTrainManager:
 
     def __save_end_epoch_output(self, epoch) -> None:
 
+        """ Stores the current data and output as .png images (currently called at the end of each epoch) """
+      
         # Filepath and filename for the per-epoch output images
         (
             filepath_real_A,
@@ -885,6 +952,8 @@ class RunTrainManager:
         pass
 
     def __save_end_epoch_logs(self, epoch, run) -> None:
+
+        """ Saves the noise, mse losses and average errors to a newline in the previously created .csv file (at the end of each epoch) """
 
         with open(f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/logs.csv", "a+", newline="") as file:
             writer = csv.writer(file)
@@ -1006,8 +1075,8 @@ class RunTrainManager:
         self.per_epoch_axes[2].plot(self.noise_factor_array, label="Noise factor", color="tab:gray")
 
         # Plot mse loss values
-        self.per_epoch_axes[3].plot(self.avg_mse_loss_generated_A_array, label="MSE Loss A", color="forestgreen")
-        self.per_epoch_axes[3].plot(self.avg_mse_loss_generated_B_array, label="MSE Loss B", color="orangered")
+        self.per_epoch_axes[3].plot(self.avg_mse_loss_generated_A_array, label="MSE Loss B2A", color="forestgreen")
+        self.per_epoch_axes[3].plot(self.avg_mse_loss_generated_B_array, label="MSE Loss A2B", color="red")
 
         # Add legends
         self.per_epoch_axes[0].legend(loc="upper right", frameon=True).get_frame()
@@ -1029,6 +1098,8 @@ class RunTrainManager:
 
     @staticmethod
     def makedirs(path: str, dir: str):
+
+        """ Create the required directories to store the output data/images """
 
         if dir == "outputs":
             try:
@@ -1054,17 +1125,22 @@ class RunTrainManager:
     @staticmethod
     def get_run_path(run, dataset_name: str, channels: int, use_one_directory: bool = False) -> str:
 
+        """ Create and return the directory path for the passed run """ 
+
         # Store today's date in string format
         TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
         TODAY_TIME = datetime.today().strftime("%H.%M.%S")
 
+        # Determine how many digits need to USED
         digits = len(str(run.num_epochs))
 
         # Create a unique name for this run
         RUN_NAME = f"{TODAY_TIME}___EP{str(run.num_epochs).zfill(digits)}_DE{str(run.decay_epochs).zfill(digits)}_LR{run.learning_rate}_CH{channels}"
 
+        # Combine the paths to a single path
         RUN_PATH = f"{dataset_name}/{TODAY_DATE}/{RUN_NAME}"
 
+        # Only enable this boolean during development. It overwrite the previous data to avoid deleting a lot of created folders
         if use_one_directory:
             RUN_PATH = f"QUICK_DEV_DIR"
 
@@ -1101,7 +1177,7 @@ if __name__ == "__main__":
 
         """ Train a [L2R] model on the RGB dataset """
 
-        # l2r_dataset_train_RGB = mydataloader.get_dataset("l2r", "Test_Set_GRAYSCALE", "train", (68, 120), 1, True)
+        # l2r_dataset_train_RGB = mydataloader.get_dataset("l2r", "Test_Set_RGB", "train", (68, 120), 1, True)
         # l2r_manager_RGB = RunTrainManager(l2r_dataset_train_RGB, 1, PARAMETERS)
         # l2r_manager_RGB.start_cycle()
 
@@ -1117,17 +1193,11 @@ if __name__ == "__main__":
         # s2d_manager_RGB = RunTrainManager(s2d_dataset_train_RGB, 3, PARAMETERS)
         # s2d_manager_RGB.start_cycle()
 
-        """ _____________ """
+        """ Train a [S2D] model on the Test_Set_RGB_DISPARITY dataset """
 
         s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (68, 120), 1, False)
         s2d_manager_RGB = RunTrainManager(s2d_dataset_train_RGB, 1, PARAMETERS)
         s2d_manager_RGB.start_cycle()
-
-        """ _____________ """
-
-        # s2d_dataset_train = mydataloader.get_dataset("s2d", "DrivingStereoDemo", "train", (88, 40), 1, False)
-        # s2d_manager = RunTrainManager(s2d_dataset_train, 1, PARAMETERS)
-        # s2d_manager.start_cycle()
 
     except KeyboardInterrupt:
         try:
