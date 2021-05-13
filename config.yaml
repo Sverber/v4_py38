@@ -1,3 +1,5 @@
+# Currently this config file is not used, because during development it is quicker to configure the parameters in the python file itself
+
 parameters:
   - device: "cuda"
   - num_workers: 8

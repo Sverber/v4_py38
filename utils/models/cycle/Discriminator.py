@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 class Discriminator(nn.Module):
 
-    """ Insert documentation """
+    """ Discriminator network of the GAN """
 
     def __init__(self, in_channels: int, out_channels: int):
 
@@ -71,7 +71,7 @@ class Discriminator(nn.Module):
 
 class __Discriminator(nn.Module):
 
-    """ Insert documentation """
+    """ Original Discriminator network that is used in the CycleGAN """
 
     def __init__(self, in_channels: int, out_channels: int):
 

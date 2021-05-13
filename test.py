@@ -2,7 +2,6 @@
 from __future__ import absolute_import, division, print_function
 
 import os
-import cv2
 import sys
 import numpy as np
 import PIL.Image as PIL
@@ -19,15 +18,18 @@ import torchvision.utils as vutils
 from PIL import Image
 from tqdm import tqdm
 from datetime import datetime
+from torchvision import transforms
 from collections import OrderedDict
 
 from torch.utils.data.dataloader import DataLoader
 
 from utils.classes.dataloaders import MyDataLoader
 from utils.classes.RunCycleBuilder import RunCycleBuilder
-from utils.classes.RunCycleManager import RunCycleManager
-from utils.classes.StereoDisparityDataset import StereoDisparityDataset
 from utils.models.cycle.Generators import Generator
+
+
+# Clear the terminal
+os.system("cls")
 
 
 # Constants: required directories
@@ -37,9 +39,10 @@ DIR_RESULTS = f"./results"
 DIR_WEIGHTS = f"./weights"
 
 
+# Parameters
 PARAMETERS: OrderedDict = OrderedDict(
     device=[torch.device("cuda" if torch.cuda.is_available() else "cpu")],
-    shuffle=[True],
+    shuffle=[False],
     num_workers=[8],
     manualSeed=[999],
     learning_rate=[0.0002],
@@ -52,7 +55,7 @@ PARAMETERS: OrderedDict = OrderedDict(
 # Initialize weights
 def initialize_weights(m):
 
-    """ Custom weights initialization called on net_G and net_D """
+    """ Custom weights initialization called on a Generator or Discriminator network """
 
     classname = m.__class__.__name__
 
@@ -68,12 +71,16 @@ def initialize_weights(m):
 
 # Testing function
 def test(
-    dataset: StereoDisparityDataset,
+    dataset,
     parameters: OrderedDict,
     channels: int,
     #
     dataset_group: str,
     dataset_name: str,
+    extra_note: str,
+    #
+    model_group: str,
+    model_folder: str,
     model_name: str,
     model_date: str,
     #
@@ -81,9 +88,9 @@ def test(
     model_netG_B2A: str,
 ) -> None:
 
-    """ Insert documentation """
+    """ Test the generators models A2B and B2A on a given dataset """
 
-    path_to_folder = f"weights/{dataset_group}/{dataset_name}/{model_date}/{model_name}"
+    path_to_folder = f"weights/{model_group}/{model_folder}/{model_date}/{model_name}"
 
     # Iterate over every run, based on the configurated params
     for run in RunCycleBuilder.get_runs(parameters):
@@ -96,14 +103,15 @@ def test(
         TODAY_TIME = datetime.today().strftime("%H.%M.%S")
 
         # Create a unique name for this run
-        RUN_NAME = f"{TODAY_TIME}___EP{run.num_epochs}_DE{run.decay_epochs}_LR{run.learning_rate}_BS{run.batch_size}"
+        RUN_NAME = f"{TODAY_TIME}___EP{run.num_epochs}_DE{run.decay_epochs}_LR{run.learning_rate}_BS{run.batch_size}_{extra_note}"
         RUN_PATH = f"{dataset_group}/{dataset_name}/{TODAY_DATE}/{RUN_NAME}"
 
         # Make required directories for testing
         try:
             os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "A"))
             os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "B"))
-            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "D"))
+            if channels == 1:
+                os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "D"))
         except OSError:
             pass
 
@@ -142,16 +150,27 @@ def test(
 
             """ (1) Read input data """
 
-            # Get image A and image B
-            real_image_A_left = data["A_left"].to(run.device)
-            real_image_A_right = data["A_right"].to(run.device)
-            real_image_B = data["B"].to(run.device)
+            # Get image A and image B from a l2r dataset
+            if dataset_group == "l2r":
+                real_image_A = data["left"].to(run.device)
+                real_image_B = data["right"].to(run.device)
 
-            # Concatenate left- and right view into one stereo image
-            real_image_A = torch.cat((real_image_A_left, real_image_A_right), dim=-1)
-            real_image_B = real_image_B
+            # Get image A and B from a s2d dataset
+            elif dataset_group == "s2d":
+                real_image_A_left = data["A_left"].to(run.device)
+                real_image_A_right = data["A_right"].to(run.device)
+                real_image_B = data["B"].to(run.device)
 
-            """ (2) Generate output """
+                # Add the left- and right into one image (image A)
+                real_image_A = torch.add(real_image_A_left, real_image_A_right)
+
+                # Normalize again
+                if channels == 1:
+                    transforms.Normalize(mean=(0.5), std=(0.5))(real_image_A)
+                elif channels == 3:
+                    transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))(real_image_A)
+
+            """ Generate output """
 
             # Generate output
             _fake_image_A = netG_B2A(real_image_B)
@@ -161,21 +180,44 @@ def test(
             _fake_original_image_A = netG_B2A(_fake_image_B)
             _fake_original_image_B = netG_A2B(_fake_image_A)
 
-            """ (1) Convert to usable images """
+            """ Convert to usable images """
 
-            # Convert to usable images
+            # Convert to usable images, this makes sure they are in a [0, 1] range instead of [-1, 1]
             fake_image_A = 0.5 * (_fake_image_A.data + 1.0)
             fake_image_B = 0.5 * (_fake_image_B.data + 1.0)
 
-            # Convert to usable images
+            # Convert to usable images, this makes sure they are in a [0, 1] range instead of [-1, 1]
             fake_original_image_A = 0.5 * (_fake_original_image_A.data + 1.0)
             fake_original_image_B = 0.5 * (_fake_original_image_B.data + 1.0)
 
-            """ (1) Calculate losses for the generated (fake) output """
+            """ Calculate MSE losses """
+
+            def mse(image_A, image_B):
+
+                # the 'Mean Squared Error' between the two images is the
+                # sum of the squared difference between the two images;
+                # note: the two images must have the same dimension
+
+                error = np.sum((image_A.astype("float") - image_B.astype("float")) ** 2)
+                error /= float(image_A.shape[0] * image_A.shape[1])
+
+                # return the MSE, the lower the error, the more "similar"
+                # the two images are
+
+                return error
+
+            np_real_image_A, np_real_image_B = (
+                real_image_A.squeeze().cpu().numpy(),
+                real_image_B.squeeze().cpu().numpy(),
+            )
+            np_fake_image_A, np_fake_image_B = (
+                fake_image_A.squeeze().cpu().numpy(),
+                fake_image_B.squeeze().cpu().numpy(),
+            )
 
             # Calculate the mean square error (MSE) loss
-            mse_loss_A = mse_loss(fake_image_A, real_image_B)
-            mse_loss_B = mse_loss(fake_image_B, real_image_A)
+            mse_loss_A = mse(np_fake_image_A, np_real_image_B)
+            mse_loss_B = mse(np_fake_image_B, np_real_image_A)
 
             # Calculate the sum of all mean square error (MSE) losses
             cum_mse_loss_A += mse_loss_A
@@ -185,7 +227,7 @@ def test(
             avg_mse_loss_A = cum_mse_loss_A / (i + 1)
             avg_mse_loss_B = cum_mse_loss_B / (i + 1)
 
-            """ (1) Calculate losses for the generated (fake) original images """
+            """ Calculate losses for the generated (fake) original images """
 
             # Calculate the mean square error (MSE) for the generated (fake) originals A and B
             mse_loss_f_or_A = mse_loss(fake_original_image_A, real_image_A)
@@ -199,12 +241,10 @@ def test(
             avg_mse_loss_f_or_A = cum_mse_loss_f_or_A / (i + 1)
             avg_mse_loss_f_or_B = cum_mse_loss_f_or_B / (i + 1)
 
-            """ (1) Define filepaths, save generated output and print a progress bar """
+            """ Define filepaths, save generated output and print a progress bar """
 
             # Filepath and filename for the real and generated output images
             (
-                filepath_disparity_real,
-                filepath_disparity_fake,
                 filepath_real_A,
                 filepath_real_B,
                 filepath_fake_A,
@@ -212,15 +252,12 @@ def test(
                 filepath_f_or_A,
                 filepath_f_or_B,
             ) = (
-                f"{DIR_RESULTS}/{RUN_PATH}/D/{i + 1:04d}___disparity_real.png",
-                f"{DIR_RESULTS}/{RUN_PATH}/D/{i + 1:04d}___disparity_fake.png",
-                #
                 f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}___real_sample.png",
                 f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}___real_sample.png",
-                f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}___fake_sample_MSE{mse_loss_A:.3f}.png",
-                f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}___fake_sample_MSE{mse_loss_B:.3f}.png",
-                f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}___fake_original_MSE{mse_loss_f_or_A:.3f}.png",
-                f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}___fake_original_MSE{mse_loss_f_or_B:.3f}.png",
+                f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}___fake_sample_MSE_{mse_loss_A:.5f}.png",
+                f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}___fake_sample_MSE_{mse_loss_B:.5f}.png",
+                f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}___fake_original_MSE_{mse_loss_f_or_A:.5f}.png",
+                f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}___fake_original_MSE_{mse_loss_f_or_B:.5f}.png",
             )
 
             # Save real input images
@@ -235,13 +272,9 @@ def test(
             vutils.save_image(fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
             vutils.save_image(fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
 
-            # Save generated (fake) original images
-            vutils.save_image(fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
-            vutils.save_image(fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
-
             """ Convert to disparity maps """
 
-            def __convert_disparty(image_np, path) -> np.ndarray:
+            def __convert_disparty(image_np) -> np.ndarray:
 
                 vmin = image_np.min()
                 vmax = np.percentile(image_np, 100)
@@ -253,48 +286,46 @@ def test(
                 mapper = cm.ScalarMappable(norm=normalizer, cmap="magma")
                 colormapped_im = (mapper.to_rgba(image_np)[:, :, :3] * 255).astype(np.uint8)
 
-                # Convert numpy array to PIL
+                # Convert to PIL and return np.ndarray
                 image_target = PIL.fromarray(colormapped_im)
 
-                # Save
-                image_target.save(path)
+                return np.array(image_target)
 
-                return image_target
+            if channels == 1:
 
-            # Convert images to numpy array
-            np_image_real_A = real_image_B.squeeze().cpu().numpy()
-            np_image_fake_B = real_image_B.squeeze().cpu().numpy()
+                # Convert grayscale to disparity map
+                np_real_image_B: np.ndarray = __convert_disparty(real_image_B.squeeze().cpu().numpy())
+                np_fake_image_A: np.ndarray = __convert_disparty(fake_image_A.squeeze().cpu().numpy())
 
-            # Convert to disparity and save to path
-            disparity_image_real: np.ndarray = __convert_disparty(np_image_real_A, filepath_disparity_real)
-            disparity_image_fake: np.ndarray = __convert_disparty(np_image_fake_B, filepath_disparity_fake)
+                mse_disparity_real = mse(np_real_image_B, np_real_image_B)
 
-            disparity_image_real.show()
-            disparity_image_fake.show()
+                # Filepaths
+                filepath_disparity_real, filepath_disparity_fake, filepath_input_sample = (
+                    f"{DIR_RESULTS}/{RUN_PATH}/D/{i + 1:04d}___disparity_real_MSE_{mse_disparity_real:.3f}.png",
+                    f"{DIR_RESULTS}/{RUN_PATH}/D/{i + 1:04d}___disparity_fake_MSE_{mse_loss_A:.3f}.png",
+                    f"{DIR_RESULTS}/{RUN_PATH}/D/{i + 1:04d}___input_sample.png",
+                )
 
-            """ Bilateral filter """
+                # Save disparity maps
+                Image.fromarray(np_real_image_B).save(filepath_disparity_real)
+                Image.fromarray(np_fake_image_A).save(filepath_disparity_fake)
+                vutils.save_image(real_image_A.detach(), filepath_input_sample, normalize=True)
 
-            def __bilateral_filter(image) -> np.ndarray:
+                # Convert to disparity tensor into the range [0,1]
+                disparity_image_real = 0.5 * (torch.tensor(np_real_image_B).data + 1.0)
+                disparity_image_fake = 0.5 * (torch.tensor(np_fake_image_A).data + 1.0)
 
-                open_cv_image = np.array(image)
-                open_cv_image = open_cv_image[:, :, ::-1].copy()
-
-                bilateral_image = cv2.bilateralFilter(open_cv_image, 9, 75, 75)
-
-                return PIL.fromarray(bilateral_image)
-
-            # # Run a bilateral filter over the images
-            # bilateral_image_real: np.ndarray = __bilateral_filter(np_image_real_A)
-            # bilateral_image_fake: np.ndarray = __bilateral_filter(np_image_fake_B)
-
-            # # Show
-            # bilateral_image_real.show()
-            # bilateral_image_fake.show()
+                # Calculate the mean square error (MSE) loss
+                mse_loss_disparity = mse_loss(disparity_image_fake, disparity_image_real)
 
             """ Progress bar """
 
             # Print a progress bar in terminal
-            progress_bar.set_description(f"Process images {i + 1} of {len(loader)}")
+            progress_bar.set_description(
+                f"Process images {i + 1} of {len(loader)}  ||  "
+                f"avg_mse_loss_A: {avg_mse_loss_A:.3f} ; avg_mse_loss_B: {avg_mse_loss_B:.3f} ||  "
+                f"avg_mse_loss_f_or_A: {avg_mse_loss_f_or_A:.3f} ; avg_mse_loss_f_or_B: {avg_mse_loss_f_or_B:.3f} ||  "
+            )
 
         # Calculate average mean squared error (MSE)
         avg_mse_loss_A = cum_mse_loss_A / len(loader)
@@ -310,8 +341,15 @@ def test(
         print("MSE(avg) fake_original_image_A:", avg_mse_loss_f_or_A)
         print("MSE(avg) fake_original_image_B:", avg_mse_loss_f_or_B)
 
-    # </end> def test():
     pass
+
+
+""" [TO-DO]
+
+    - Rewrite the variable names so that they correspond (again) with the ones I use in train.py
+    - Clean up the code and remove unnecessary code
+    
+""" 
 
 
 # Execute main code
@@ -321,25 +359,23 @@ if __name__ == "__main__":
 
         mydataloader = MyDataLoader()
 
-        s2d_dataset_test_RGB_DISPARITY = mydataloader.get_dataset(
-            "s2d", "Test_Set_RGB_DISPARITY", "test", (164, 276), 1, False
-        )
-
         test(
             parameters=PARAMETERS,
-            dataset=s2d_dataset_test_RGB_DISPARITY,
+            dataset=mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "test", (68, 120), 1, False),
             channels=1,
             #
-            dataset_group="s2d",
-            dataset_name="Test_Set_RGB_DISPARITY",
-            model_date="2021-04-28",
-            model_name="11.51.48___EP100_DE050_LR0.0002_CH1",
+            dataset_group=f"s2d",
+            dataset_name=f"Test_Set_RGB_DISPARITY",
+            extra_note="test",
             #
-            model_netG_A2B=f"net_G_A2B.pth",
-            model_netG_B2A=f"net_G_B2A.pth",
+            model_group="s2d",
+            model_folder="Test_Set_RGB_DISPARITY",
+            model_date=f"2021-05-10",
+            model_name=f"15.23.54___EP100_DE050_LR0.0002_CH1",
+            #
+            model_netG_A2B=f"net_G_A2B_epoch_90.pth",
+            model_netG_B2A=f"net_G_B2A_epoch_90.pth",
         )
-
-        pass
 
     except KeyboardInterrupt:
         try:
