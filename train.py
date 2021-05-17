@@ -105,6 +105,7 @@ class RunTrainManager:
         self.loader = None
         self.validation_batch_index = None
         self.batch_is_validation = False
+        self.freq_update_discriminator = 5
 
         # Runs
         self.runs = self.__build_cycle(parameters)
@@ -123,7 +124,7 @@ class RunTrainManager:
             random.seed(run.manualSeed)
             torch.manual_seed(run.manualSeed)
 
-            # Create the directory path for this run 
+            # Create the directory path for this run
             self.RUN_PATH = self.get_run_path(run, self.dataset.name, self.channels)
 
             # Make required directories for storing the training output
@@ -152,13 +153,17 @@ class RunTrainManager:
 
             # Optimizers
             self.optimizer_G_A2B = torch.optim.Adam(
-                self.net_G_A2B.parameters(), lr=run.learning_rate, betas=(0.5, 0.999)
+                self.net_G_A2B.parameters(), lr=run.learning_rate_gen, betas=(0.5, 0.999)
             )
             self.optimizer_G_B2A = torch.optim.Adam(
-                self.net_G_B2A.parameters(), lr=run.learning_rate, betas=(0.5, 0.999)
+                self.net_G_B2A.parameters(), lr=run.learning_rate_gen, betas=(0.5, 0.999)
             )
-            self.optimizer_D_A = torch.optim.Adam(self.net_D_A.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
-            self.optimizer_D_B = torch.optim.Adam(self.net_D_B.parameters(), lr=run.learning_rate, betas=(0.5, 0.999))
+            self.optimizer_D_A = torch.optim.Adam(
+                self.net_D_A.parameters(), lr=run.learning_rate_dis, betas=(0.5, 0.999)
+            )
+            self.optimizer_D_B = torch.optim.Adam(
+                self.net_D_B.parameters(), lr=run.learning_rate_dis, betas=(0.5, 0.999)
+            )
 
             # Learning rates
             self.lr_lambda = DecayLR(run.num_epochs, 0, run.decay_epochs).step
@@ -181,6 +186,7 @@ class RunTrainManager:
 
             # Keep track of the per-epoch losses
             self.losses_G_A2B, self.losses_G_B2A = [], []
+            self.losses_G_A2B_adv, self.losses_G_B2A_adv = [], []
             self.losses_D_A, self.losses_D_B = [], []
 
             # Keep track of the per-epoch average MSE loss
@@ -197,7 +203,12 @@ class RunTrainManager:
 
                 # Keep track of the per-batch losses during one epoch
                 self.batch_losses_G_A2B, self.batch_losses_G_B2A = [], []
+                self.batch_losses_G_A2B_adv, self.batch_losses_G_B2A_adv = [], []
                 self.batch_losses_D_A, self.batch_losses_D_B = [], []
+
+                self.batch_losses_error_D_real_A, self.batch_losses_error_D_real_B = [], []
+                self.batch_losses_error_D_fake_A, self.batch_losses_error_D_fake_B = [], []
+
                 self.full_batch_losses_G_A, self.full_batch_losses_G_B = [], []
 
                 # Keep track of the mse losses of the generated images
@@ -231,6 +242,7 @@ class RunTrainManager:
                     self.__add_discriminator_noise(run, epoch)
 
                     # Update discriminator networks
+                    # if i > 0 and i % self.freq_update_discriminator == 0:
                     self.__update_discriminators(i)
 
                     # Update MSE loss on generated images
@@ -321,6 +333,10 @@ class RunTrainManager:
         # Average error on G
         self.cum_error_G_A2B, self.avg_error_G_A2B = 0, 0
         self.cum_error_G_B2A, self.avg_error_G_B2A = 0, 0
+
+        # Average error on G
+        self.cum_error_G_A2B_adv_loss, self.avg_error_G_A2B_adv_loss = 0, 0
+        self.cum_error_G_B2A_adv_loss, self.avg_error_G_B2A_adv_loss = 0, 0
 
         """ Variables for error tracking on validation set """
 
@@ -568,7 +584,7 @@ class RunTrainManager:
 
         # Only update weights when using training data
         if self.batch_is_validation == False:
-                
+
             # Error G_A2B
             self.error_G_A2B = self.loss_GAN_A2B + self.loss_identity_A2B + self.loss_cycle_ABA
 
@@ -583,6 +599,14 @@ class RunTrainManager:
             self.cum_error_G_B2A += self.error_G_B2A
             self.avg_error_G_B2A = self.cum_error_G_B2A / (i + 1)
 
+            # Average error on G_A2B (adversarial loss only, so we can compare to the Discriminator)
+            self.cum_error_G_A2B_adv_loss += self.loss_GAN_A2B
+            self.avg_error_G_A2B_adv_loss = self.cum_error_G_A2B_adv_loss / (i + 1)
+
+            # Average error on G_B2A (adversarial loss only, so we can compare to the Discriminator)
+            self.cum_error_G_B2A_adv_loss += self.loss_GAN_B2A
+            self.avg_error_G_B2A_adv_loss = self.cum_error_G_B2A_adv_loss / (i + 1)
+
             # Calculate gradients for G_A and G_B
             self.error_G_A2B.backward()
             self.error_G_B2A.backward()
@@ -593,7 +617,7 @@ class RunTrainManager:
 
         else:
 
-            # Validation error G_A2B 
+            # Validation error G_A2B
             self.v__error_G_A2B = self.loss_GAN_A2B + self.loss_identity_A2B + self.loss_cycle_ABA
 
             # Validation error G_B2A
@@ -645,7 +669,7 @@ class RunTrainManager:
             self.optimizer_D_A.step()
 
         else:
-            
+
             # Combined loss and calculate gradients
             self.v__error_D_A = (self.error_D_real_A + self.error_D_fake_A) / 2
 
@@ -669,7 +693,6 @@ class RunTrainManager:
         self.generated_image_A2B_noise = self.fake_B_buffer.push_and_pop(self.generated_image_A2B_noise)
         self.generated_output_B = self.net_D_B(self.generated_image_A2B_noise.detach())
         self.error_D_fake_B = self.adversarial_loss(self.generated_output_B, self.fake_smooth_label)
-
 
         # Only update weights when using training data
         if self.batch_is_validation == False:
@@ -738,16 +761,30 @@ class RunTrainManager:
         if self.batch_is_validation == False:
 
             self.progress_bar.set_description(
-                f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}][nf={self.noise_factor:.3f}]  ||  "
-                f"avg_error_D_A: {self.avg_error_D_A:.3f} ; "
-                f"avg_error_D_B: {self.avg_error_D_B:.3f}  || "
-                f"avg_error_G_A2B: {self.avg_error_G_A2B:.3f} ; "
-                f"avg_error_G_B2A: {self.avg_error_G_B2A:.3f} || "
-                f"avg_MSE_loss_A: {self.avg_mse_loss_generated_A:.3f} "
-                f"avg_MSE_loss_B: {self.avg_mse_loss_generated_B:.3f} || "
+                f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}]  ||  "
+                #
+                # Network adversarial losses
+                f"Avg. adv. losses:  "
+                f"D_A: {self.avg_error_D_A:.3f} ; "
+                f"D_B: {self.avg_error_D_B:.3f}  ||  "
+                f"G_A2B: {self.avg_error_G_A2B_adv_loss:.3f} ; "
+                f"G_B2A: {self.avg_error_G_B2A_adv_loss:.3f}  ||  "
+                #  
+                # Loss difference between the networks
+                f"Avg. loss differences:  "
+                f"A2B_B: {(self.avg_error_G_A2B_adv_loss - self.avg_error_D_B):.3f} ; "
+                f"B2A_A: {(self.avg_error_G_B2A_adv_loss - self.avg_error_D_A):.3f}  ||  "
+                #
+                # Total losses
+                # f"loss_G_A2B: {self.avg_error_G_A2B:.3f} ; "
+                # f"loss_G_B2A: {self.avg_error_G_B2A:.3f} || "
+                #
+                # MSE losses for A2B and B2A
+                # f"MSE_A: {self.avg_mse_loss_generated_A:.3f} ; "
+                # f"MSE_B: {self.avg_mse_loss_generated_B:.3f} || "
             )
 
-        # Print correct output if the current batch is used for validation
+        # Print correct output if the current batch is used for validation # deprecated
         else:
 
             self.progress_bar.set_description(
@@ -902,7 +939,7 @@ class RunTrainManager:
     def __save_end_epoch_output(self, epoch) -> None:
 
         """ Stores the current data and output as .png images (currently called at the end of each epoch) """
-      
+
         # Filepath and filename for the per-epoch output images
         (
             filepath_real_A,
@@ -980,41 +1017,70 @@ class RunTrainManager:
 
         """ Append the current per-batch losses to the arrays containing the network losses """
 
+        # Total losses for all networks
         self.batch_losses_G_A2B.append(self.error_G_A2B.cpu().detach().numpy())
         self.batch_losses_G_B2A.append(self.error_G_B2A.cpu().detach().numpy())
         self.batch_losses_D_A.append(self.error_D_A.cpu().detach().numpy())
         self.batch_losses_D_B.append(self.error_D_B.cpu().detach().numpy())
+
+        # Individual
+        self.batch_losses_error_D_real_A.append(self.error_D_real_A.cpu().detach().numpy())
+        self.batch_losses_error_D_real_B.append(self.error_D_real_B.cpu().detach().numpy())
+        self.batch_losses_error_D_fake_A.append(self.error_D_fake_A.cpu().detach().numpy())
+        self.batch_losses_error_D_fake_B.append(self.error_D_fake_B.cpu().detach().numpy())
+
+        # Adversarial losses only of all networks
+        self.batch_losses_G_A2B_adv.append(self.loss_GAN_A2B.cpu().detach().numpy())
+        self.batch_losses_G_B2A_adv.append(self.loss_GAN_B2A.cpu().detach().numpy())
 
         """ Plot losses """
 
         if i % self.SHOW_GRAPH_FREQ == 0:
 
             # Create figure
-            self.per_batch_figure, self.per_batch_axes = plt.subplots(2)
+            self.per_batch_figure, self.per_batch_axes = plt.subplots(4, 1, figsize=(8, 12))
 
             # Set titles
-            self.per_batch_axes[0].set_title(f"Generator A and Generator B loss during epoch {epoch}")
-            self.per_batch_axes[1].set_title(f"Discriminator A and Discriminator B loss during epoch {epoch}")
+            self.per_batch_axes[0].set_title(f"Total loss of generators A2B & B2A (epoch {epoch})")
+            self.per_batch_axes[1].set_title(f"Total loss of discriminators A & B (epoch {epoch})")
+            self.per_batch_axes[2].set_title(f"Adversarial loss of Generator A2B and Discriminator B (epoch {epoch})")
+            self.per_batch_axes[3].set_title(f"Adversarial loss of Generator B2A and Discriminator A (epoch {epoch})")
 
             # Set labels
-            self.per_batch_axes[0].set(xlabel="Batch", ylabel="G Loss")
-            self.per_batch_axes[1].set(xlabel="Batch", ylabel="D Loss")
+            self.per_batch_axes[0].set(xlabel="Batch", ylabel="G total Loss")
+            self.per_batch_axes[1].set(xlabel="Batch", ylabel="D total Loss")
+            self.per_batch_axes[2].set(xlabel="Batch", ylabel="Adv. loss")
+            self.per_batch_axes[3].set(xlabel="Batch", ylabel="Adv. loss")
 
             # Add gridlines
             self.per_batch_axes[0].grid()
             self.per_batch_axes[1].grid()
+            self.per_batch_axes[2].grid()
+            self.per_batch_axes[3].grid()
 
             # Plot generator values
-            self.per_batch_axes[0].plot(self.batch_losses_G_A2B, label="G_A2B", color="tab:blue")
-            self.per_batch_axes[0].plot(self.batch_losses_G_B2A, label="G_B2A", color="tab:orange")
+            self.per_batch_axes[0].plot(self.batch_losses_G_A2B, label="Total loss G_A2B", color="tab:blue")
+            self.per_batch_axes[0].plot(self.batch_losses_G_B2A, label="Total loss G_B2A", color="tab:orange")
+            # self.per_batch_axes[0].plot(self.batch_losses_G_A2B_adv, label="Adv. loss G_A2B", color="tab:blue")
+            # self.per_batch_axes[0].plot(self.batch_losses_G_B2A_adv, label="Adv. loss G_B2A", color="tab:orange")
 
             # Plot discriminator values
             self.per_batch_axes[1].plot(self.batch_losses_D_A, label="D_A", color="tab:blue")
             self.per_batch_axes[1].plot(self.batch_losses_D_B, label="D_B", color="tab:orange")
 
+            # Plot the adversarial losses of all the A2B networks
+            self.per_batch_axes[2].plot(self.batch_losses_G_A2B_adv, label="G_A2B", color="tab:blue")
+            self.per_batch_axes[2].plot(self.batch_losses_D_B, label="D_B", color="tab:orange")
+
+            # Plot the adversarial losses of all the B2A networks
+            self.per_batch_axes[3].plot(self.batch_losses_G_B2A_adv, label="G_B2A", color="tab:blue")
+            self.per_batch_axes[3].plot(self.batch_losses_D_A, label="D_A", color="tab:orange")
+
             # Add legends
             self.per_batch_axes[0].legend(loc="upper right", frameon=True).get_frame()
             self.per_batch_axes[1].legend(loc="upper right", frameon=True).get_frame()
+            self.per_batch_axes[2].legend(loc="upper right", frameon=True).get_frame()
+            self.per_batch_axes[3].legend(loc="upper right", frameon=True).get_frame()
 
             # Adjust layout and save
             self.per_batch_figure.tight_layout(h_pad=2.0, w_pad=0.0)
@@ -1030,14 +1096,23 @@ class RunTrainManager:
 
         """ Append the current average losses, mse losses and noise factors to the arrays containing the network losses """
 
+        # Generator adversarial losses
+        self.losses_G_A2B_adv.append(self.avg_error_G_A2B_adv_loss.cpu().detach().numpy())
+        self.losses_G_B2A_adv.append(self.avg_error_G_B2A_adv_loss.cpu().detach().numpy())
+
+        # Generator total losses
         self.losses_G_A2B.append(self.avg_error_G_A2B.cpu().detach().numpy())
         self.losses_G_B2A.append(self.avg_error_G_B2A.cpu().detach().numpy())
+
+        # Discriminator adversarial (total) losses
         self.losses_D_A.append(self.avg_error_D_A.cpu().detach().numpy())
         self.losses_D_B.append(self.avg_error_D_B.cpu().detach().numpy())
 
+        # MSE losses
         self.avg_mse_loss_generated_A_array.append(self.avg_mse_loss_generated_A.cpu().detach().numpy())
         self.avg_mse_loss_generated_B_array.append(self.avg_mse_loss_generated_B.cpu().detach().numpy())
 
+        # Noise factor
         self.noise_factor_array.append(self.noise_factor)
 
         """ Plot losses """
@@ -1045,15 +1120,16 @@ class RunTrainManager:
         # Create figure
         self.per_epoch_figure, self.per_epoch_axes = plt.subplots(4, 1, figsize=(8, 12))
 
+        # self.per_batch_axes[0].set_title(f"Total loss of generator A2B & B2A (epoch {epoch})")
         # Set titles
-        self.per_epoch_axes[0].set_title(f"Generator A and Generator B loss during training")
-        self.per_epoch_axes[1].set_title(f"Discriminator A and Discriminator B loss training")
+        self.per_epoch_axes[0].set_title(f"The total losses and adversarial losses of Generators A2B & B2A (during training)")
+        self.per_epoch_axes[1].set_title(f"The total losses (adversarial) losses of Discriminators A & B (during training)")
         self.per_epoch_axes[2].set_title(f"Decaying noise factor during training")
         self.per_epoch_axes[3].set_title(f"Average MSE losses of the generated images during training")
 
         # Set labels
-        self.per_epoch_axes[0].set(xlabel="Epoch", ylabel="G Loss")
-        self.per_epoch_axes[1].set(xlabel="Epoch", ylabel="D Loss")
+        self.per_epoch_axes[0].set(xlabel="Epoch", ylabel="G loss")
+        self.per_epoch_axes[1].set(xlabel="Epoch", ylabel="D loss")
         self.per_epoch_axes[2].set(xlabel="Epoch", ylabel="Noise factor")
         self.per_epoch_axes[3].set(xlabel="Epoch", ylabel="MSE loss")
 
@@ -1064,12 +1140,14 @@ class RunTrainManager:
         self.per_epoch_axes[3].grid()
 
         # Plot generator values
-        self.per_epoch_axes[0].plot(self.losses_G_A2B, label="G_A2B", color="tab:blue")
-        self.per_epoch_axes[0].plot(self.losses_G_B2A, label="G_B2A", color="tab:orange")
+        # self.per_epoch_axes[0].plot(self.losses_G_A2B, label="Total loss G_A2B", color="tab:blue")
+        # self.per_epoch_axes[0].plot(self.losses_G_B2A, label="Total loss G_B2A", color="tab:orange")
+        self.per_epoch_axes[0].plot(self.losses_G_A2B_adv, label="Adv. loss G_A2B", color="tab:blue")
+        self.per_epoch_axes[0].plot(self.losses_D_B, label="Adv. loss D_B", color="tab:orange")
 
         # Plot discriminator values
-        self.per_epoch_axes[1].plot(self.losses_D_A, label="D_A", color="tab:blue")
-        self.per_epoch_axes[1].plot(self.losses_D_B, label="D_B", color="tab:orange")
+        self.per_epoch_axes[1].plot(self.losses_G_B2A_adv, label="Adv. loss G_B2A", color="tab:orange")
+        self.per_epoch_axes[1].plot(self.losses_D_A, label="Adv. loss D_A", color="tab:blue")
 
         # Plot noise factor values
         self.per_epoch_axes[2].plot(self.noise_factor_array, label="Noise factor", color="tab:gray")
@@ -1125,7 +1203,7 @@ class RunTrainManager:
     @staticmethod
     def get_run_path(run, dataset_name: str, channels: int, use_one_directory: bool = False) -> str:
 
-        """ Create and return the directory path for the passed run """ 
+        """ Create and return the directory path for the passed run """
 
         # Store today's date in string format
         TODAY_DATE = datetime.today().strftime("%Y-%m-%d")
@@ -1135,7 +1213,7 @@ class RunTrainManager:
         digits = len(str(run.num_epochs))
 
         # Create a unique name for this run
-        RUN_NAME = f"{TODAY_TIME}___EP{str(run.num_epochs).zfill(digits)}_DE{str(run.decay_epochs).zfill(digits)}_LR{run.learning_rate}_CH{channels}"
+        RUN_NAME = f"{TODAY_TIME}___EP{str(run.num_epochs).zfill(digits)}_DE{str(run.decay_epochs).zfill(digits)}_LRG{run.learning_rate_gen}_CH{channels}"
 
         # Combine the paths to a single path
         RUN_PATH = f"{dataset_name}/{TODAY_DATE}/{RUN_NAME}"
@@ -1152,7 +1230,8 @@ PARAMETERS: OrderedDict = OrderedDict(
     shuffle=[True],
     num_workers=[8],
     manualSeed=[999],
-    learning_rate=[0.0002],
+    learning_rate_dis=[0.0003],
+    learning_rate_gen=[0.0001],
     batch_size=[1],
     num_epochs=[300],
     decay_epochs=[100],

@@ -33,7 +33,7 @@ class Generator(nn.Module):
 
         to: 
 
-        nn.Upsample(scale_factor = 2, mode='bilinear'),
+        nn.Upsample(scale_factor = 2, mode='bilinear', align_corners=True),
         nn.ReflectionPad2d(1),
         nn.Conv2d(ngf * mult, int(ngf * mult / 2), kernel_size=3, stride=1, padding=0),
 
@@ -78,9 +78,9 @@ class Generator(nn.Module):
             # nn.ConvTranspose2d(
             #     in_channels=256, out_channels=128, kernel_size=(3, 3), stride=2, padding=1, output_padding=1
             # ),
-            nn.Upsample(scale_factor = 2, mode='bilinear'),                     # line 1 of 3 of nearest neighbour upsampling instead of ConvTranspose2d
-            nn.ReflectionPad2d(1),                                              # line 2 of 3 of nearest neighbour upsampling instead of ConvTranspose2d
-            nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=0),            # line 3 of 3 of nearest neighbour upsampling instead of ConvTranspose2d
+            nn.Upsample(scale_factor = 2, mode='bilinear', align_corners=True),                     
+            nn.ReflectionPad2d(1),                                              
+            nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=0),            
             nn.InstanceNorm2d(num_features=128),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
             nn.Dropout2d(self.dropout2d),
@@ -91,9 +91,9 @@ class Generator(nn.Module):
             #     in_channels=128, out_channels=64, kernel_size=(3, 3), stride=2, padding=1, output_padding=1
             # ),
             #
-            nn.Upsample(scale_factor = 2, mode='bilinear', align_corners=True), # line 1 of 3 of nearest neighbour upsampling instead of ConvTranspose2d
-            nn.ReflectionPad2d(1),                                              # line 2 of 3 of nearest neighbour upsampling instead of ConvTranspose2d
-            nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=0),             # line 3 of 3 of nearest neighbour upsampling instead of ConvTranspose2d
+            nn.Upsample(scale_factor = 2, mode='bilinear', align_corners=True), 
+            nn.ReflectionPad2d(1),                                              
+            nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=0),             
             nn.InstanceNorm2d(num_features=64),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
             nn.Dropout2d(self.dropout2d),
