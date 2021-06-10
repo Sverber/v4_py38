@@ -38,20 +38,6 @@ DIR_OUTPUTS = f"./outputs"
 DIR_RESULTS = f"./results"
 DIR_WEIGHTS = f"./weights"
 
-
-# Parameters
-PARAMETERS: OrderedDict = OrderedDict(
-    device=[torch.device("cuda" if torch.cuda.is_available() else "cpu")],
-    shuffle=[False],
-    num_workers=[8],
-    manualSeed=[999],
-    learning_rate=[0.0002],
-    batch_size=[1],
-    num_epochs=[100],
-    decay_epochs=[50],
-)
-
-
 # Initialize weights
 def initialize_weights(m):
 
@@ -128,8 +114,8 @@ def test(
         netG_B2A = Generator(in_channels=channels, out_channels=channels).to(run.device)
 
         # Load state dicts
-        netG_A2B.load_state_dict(torch.load(os.path.join(str(path_to_folder), "net_G_A2B", model_netG_A2B)))
         netG_B2A.load_state_dict(torch.load(os.path.join(str(path_to_folder), "net_G_B2A", model_netG_B2A)))
+        netG_A2B.load_state_dict(torch.load(os.path.join(str(path_to_folder), "net_G_A2B", model_netG_A2B)))
 
         # Set model mode
         netG_A2B.eval()
@@ -337,12 +323,18 @@ def test(
     pass
 
 
-""" [TO-DO]
 
-    - Rewrite the variable names so that they correspond (again) with the ones I use in train.py
-    - Clean up the code and remove unnecessary code
-    
-"""
+# Parameters
+PARAMETERS: OrderedDict = OrderedDict(
+    device=[torch.device("cuda" if torch.cuda.is_available() else "cpu")],
+    shuffle=[False],
+    num_workers=[8],
+    manualSeed=[999],
+    learning_rate=[0.0002],
+    batch_size=[1],
+    num_epochs=[20],
+    decay_epochs=[10],
+)
 
 
 # Execute main code
@@ -365,8 +357,8 @@ if __name__ == "__main__":
             # weights\s2d\Test_Set_RGB_DISPARITY\2021-05-13\23.33.29___EP300_DE100_LR0.0002_CH1
             model_group="s2d",
             model_folder="Test_Set_RGB_DISPARITY",
-            model_date=f"2021-05-26",
-            model_name=f"13.16.09___EP20_DE10_LRG0.0002_CH1",
+            model_date=f"2021-06-09",
+            model_name=f"01.57.44___EP20_DE10_LRG0.0002_CH1",
             #
             model_netG_A2B=f"net_G_A2B.pth",
             model_netG_B2A=f"net_G_B2A.pth",

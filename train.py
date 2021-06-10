@@ -494,9 +494,9 @@ class RunTrainManager:
         mean, std = 0.5, 0.5
 
         # Calculate until which epoch there is noise
-        self.NOISE_UNTIL_PERCENTAGE = 0.0  # default: 0.80
-        self.RANDOM_FLIP_PERCENTAGE = 0.0  # default: 0.10
-        self.SMOOTHENING_PERCENTAGE = 0.0  # default: 0.10
+        self.NOISE_UNTIL_PERCENTAGE = 0.8  # default: 0.80
+        self.RANDOM_FLIP_PERCENTAGE = 0.1  # default: 0.10
+        self.SMOOTHENING_PERCENTAGE = 0.1  # default: 0.10
 
         # Noise is gone at epoch x
         noise_until_epoch = self.NOISE_UNTIL_PERCENTAGE * run.num_epochs
@@ -607,7 +607,8 @@ class RunTrainManager:
 
         # A: 0.25 * 10 * 0.40 = 1.000
         # B: 0.15 * 10 * 0.30 = 0.750
-        # C: 0.05 * 10 * 0.25 = 0.125 --> loss, ergo the difference is low, thus
+        # C: 0.05 * 10 * 0.25 = 0.125 --> loss, ergo the difference is low, thus..
+
         """
 
         # Cycle loss: A -> B -> A
@@ -809,18 +810,19 @@ class RunTrainManager:
                 f"[{self.noise_factor:.2f}|{self.SMOOTHENING_PERCENTAGE:.2f}|{self.RANDOM_FLIP_PERCENTAGE:.2f}]  ||  "
                 #
                 # Network adversarial losses
-                f"gp_B: {self.gradient_penalty_B:.3f} ; "
-                f"cc_ABA: {self.loss_cycle_ABA:.3f}  ||  "
-                f"Avg.:  "
+                # f"gp_B: {self.gradient_penalty_B:.3f} ; "
+                # f"cc_ABA: {self.loss_cycle_ABA:.3f} ; "
+                # f"cc_gp_B: {(self.loss_cycle_ABA*self.gradient_penalty_B):.3f}  ||  "
+                f"Avg. error:  "
                 f"D_A: {self.avg_error_D_A:.3f} ; "
                 f"D_B: {self.avg_error_D_B:.3f}  ||  "
                 f"G_A2B: {self.avg_error_G_A2B_adv_loss:.3f} ; "
                 f"G_B2A: {self.avg_error_G_B2A_adv_loss:.3f}  ||  "
                 #
-                # Loss difference between the networks
-                f"Diff.: "
-                f"A2B_B: {(self.avg_error_G_A2B_adv_loss - self.avg_error_D_B):.3f} ; "
-                f"B2A_A: {(self.avg_error_G_B2A_adv_loss - self.avg_error_D_A):.3f}  ||  "
+                # # Loss difference between the networks
+                # f"Diff.: "
+                # f"A2B_B: {(self.avg_error_G_A2B_adv_loss - self.avg_error_D_B):.3f} ; "
+                # f"B2A_A: {(self.avg_error_G_B2A_adv_loss - self.avg_error_D_A):.3f}  ||  "
                 #
                 # Total losses
                 # f"loss_G_A2B: {self.avg_error_G_A2B:.3f} ; "
@@ -1233,6 +1235,7 @@ class RunTrainManager:
         """ Create the required directories to store the output data/images """
 
         if dir == "outputs":
+            print(path)
             try:
                 os.makedirs(os.path.join(path, "realtime"))
                 os.makedirs(os.path.join(path, "logs"))
@@ -1254,7 +1257,7 @@ class RunTrainManager:
                 pass
 
     @staticmethod
-    def get_run_path(run, dataset_name: str, channels: int, use_one_directory: bool = True) -> str:
+    def get_run_path(run, dataset_name: str, channels: int, use_one_directory: bool = False) -> str:
 
         """ Create and return the directory path for the passed run """
 
@@ -1329,13 +1332,18 @@ if __name__ == "__main__":
 
         channels = 3
 
+        s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (68, 120), channels, False)
+        s2d_manager_RGB = RunTrainManager(s2d_dataset_train_RGB, channels, PARAMETERS)
+        s2d_manager_RGB.start_cycle()
+
         # Test_Set,     originally (1242, 2208),    train at (68, 120)
         # DIODE,        originally (1024, 768),     train at (40, 54)
         # DIML,         originally (384, 640),      train at (64, 106)
 
-        s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "DIML", "test_disparity", (64, 106), channels, False)
-        s2d_manager_RGB = RunTrainManager(s2d_dataset_train_RGB, channels, PARAMETERS)
-        s2d_manager_RGB.start_cycle()
+        # DIML DATASET
+        # s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "DIML", "test_disparity", (64, 106), channels, False)
+        # s2d_manager_RGB = RunTrainManager(s2d_dataset_train_RGB, channels, PARAMETERS)
+        # s2d_manager_RGB.start_cycle()
 
     except KeyboardInterrupt:
         try:
