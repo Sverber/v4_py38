@@ -1,0 +1,265 @@
+Test the following variables
+
+_______________________________________________________________________________________
+
+Original architecture (no additional extras) (normal Discriminator, w/dropout), all loss functions, 3C, r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+--> outputs:    2021-05-19 / 10.17.18___EP20_DE10_LRG0.0002_CH3
+--> weights:    2021-05-19 / 10.17.18___EP20_DE10_LRG0.0002_CH3
+--> results:    2021-05-19 / 13.30.37___EP100_DE50_LR0.0002_BS1_test
+
+Original architecture (no additional extras) (normal Discriminator, w/dropout), all loss functions, 1C, r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+--> outputs:    2021-05-19 / 13.34.27___EP20_DE10_LRG0.0002_CH1
+--> weights:    2021-05-19 / 13.34.27___EP20_DE10_LRG0.0002_CH1
+--> results:    2021-05-10 / 17.02.17___EP100_DE50_LR0.0002_BS1_test
+
+Original architecture (no additional extras) (normal Discriminator, w/dropout), without id loss, 3C, r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10 
+--> outputs:    2021-05-19 / 17.05.07___EP20_DE10_LRG0.0002_CH3
+--> weights:    2021-05-19 / 17.05.07___EP20_DE10_LRG0.0002_CH3
+--> results:    2021-05-19 / 20.13.53___EP100_DE50_LR0.0002_BS1_test
+
+Original architecture (no additional extras) (normal Discriminator, w/dropout), without id loss, 1C, r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+--> outputs:    2021-05-19 / 20.17.55___EP20_DE10_LRG0.0002_CH1
+--> weights:    2021-05-19 / 20.17.55___EP20_DE10_LRG0.0002_CH1
+--> results:    2021-05-19 / 23.44.06___EP100_DE50_LR0.0002_BS1_test
+
+Adj. knn architecture (no additional extras) (normal Discriminator, w/dropout), without id loss, 3C, r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+--> outputs:    2021-05-20 / 14.36.34___EP20_DE10_LRG0.0002_CH3
+--> weights:    2021-05-20 / 14.36.34___EP20_DE10_LRG0.0002_CH3
+--> results:    2021-05-20 / 18.59.02___EP100_DE50_LR0.0002_BS1_test
+
+Adj. knn architecture (no additional extras) (normal Discriminator, w/dropout), without id loss, 1C, r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+--> outputs:    2021-05-26 / 13.16.09___EP20_DE10_LRG0.0002_CH1
+--> weights:    2021-05-26 / 13.16.09___EP20_DE10_LRG0.0002_CH1
+--> results:    2021-05-26 /
+
+Adj. knn architecture (Generator with Leaky, no dropout) (normal Discriminator, w/dropout), without id loss, 1C, r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10 --> 2021-05-19 / to-do
+--> outputs:    2021-05-26 / 19.56.09___EP20_DE10_LRG0.0002_CH1
+--> weights:    2021-05-26 / 19.56.09___EP20_DE10_LRG0.0002_CH1
+--> results:    2021-05-26 / 
+
+Adj. knn architecture (Generator with Leaky, no dropout) (normal Discriminator, w/dropout), without id loss, 3C, r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10 --> 2021-05-19 / to-do
+--> outputs:    2021-05-26 / 23.11.30___EP20_DE10_LRG0.0002_CH3
+--> weights:    2021-05-26 / 23.11.30___EP20_DE10_LRG0.0002_CH3
+--> results:    2021-05-26 / 
+
+
+_______________________________________________________________________________________
+
+Stereo image synthesis
+
+Adj knn architecture (no additional extras) (normal Discriminator), all loss functions, LR0.0002 both, 3C, | r-stereo, without noise_factor, without label_smoothing, without label_flipping --> 2021-05-20 / doing
+--> outputs:    2021-05-20 / 
+--> outputs:    2021-05-20 / 
+--> outputs:    2021-05-20 / 
+
+_______________________________________________________________________________________
+
+RESTART TESTING
+_______________________________________________________________________________________
+
+
+___________________________________________________________
+
+1. Real stereo image-pairs
+___________________________________________________________
+
+    _________________________________
+
+    1.0 Original architectures
+    _________________________________
+
+        Original architectures (Generator, no knn, relu, no dropout) (Discriminator, leaky, no dropout), no identity, 1C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-08 / 11.20.41___EP20_DE10_LRG0.0002_CH1
+        --> weights:    2021-06-08 / 11.20.41___EP20_DE10_LRG0.0002_CH1
+        --> results:    2021-06-08 / 
+
+        Original architectures (Generator, no knn, relu, no dropout) (Discriminator, leaky, no dropout), no identity, 3C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-08 / 15.31.02___EP20_DE10_LRG0.0002_CH3
+        --> weights:    2021-06-08 / 15.31.02___EP20_DE10_LRG0.0002_CH3
+        --> results:    2021-06-08 / 
+
+        Original architectures (Generator, no knn, relu, no dropout) (Discriminator, leaky, no dropout), all loss functions, 1C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-08 / 22.25.42___EP20_DE10_LRG0.0002_CH1
+        --> weights:    2021-06-08 / 22.25.42___EP20_DE10_LRG0.0002_CH1
+        --> results:    2021-06-08 / 
+
+        Original architectures (Generator, no knn, relu, no dropout) (Discriminator, leaky, no dropout), all loss functions, 3C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-08 / 18.55.23___EP20_DE10_LRG0.0002_CH3
+        --> weights:    2021-06-08 / 18.55.23___EP20_DE10_LRG0.0002_CH3
+        --> results:    2021-06-08 / 
+
+    _________________________________
+
+    1.1 K-nn upsampling
+    _________________________________
+
+        K-nn architectures (Generator, with knn, relu, no dropout) (Discriminator, leaky, no dropout), no identity loss, 1C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-09 / 01.57.44___EP20_DE10_LRG0.0002_CH1
+        --> weights:    2021-06-09 / 01.57.44___EP20_DE10_LRG0.0002_CH1
+        --> results:    2021-06-09 / 
+
+        K-nn architectures (Generator, with knn, relu, no dropout) (Discriminator, leaky, no dropout), no identity loss, 3C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-09 / 
+        --> weights:    2021-06-09 / 
+        --> results:    2021-06-09 / 
+
+        K-nn architectures (Generator, with knn, relu, no dropout) (Discriminator, leaky, no dropout), all loss functions, 1C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-09 /
+        --> weights:    2021-06-09 /
+        --> results:    2021-06-09 / 
+
+        K-nn architectures (Generator, with knn, relu, no dropout) (Discriminator, leaky, no dropout), all loss functions, 3C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-09 /
+        --> weights:    2021-06-09 /
+        --> results:    2021-06-09 / 
+        
+___________________________________________________________
+
+2. Single-view images
+___________________________________________________________
+
+    _________________________________
+
+    1.0 Original architectures
+    _________________________________
+
+        Original architectures (Generator, no knn, relu, no dropout) (Discriminator, leaky, no dropout), no identity, 1C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-09 / 
+        --> weights:    2021-06-09 / 
+        --> results:    2021-06-09 / 
+
+        Original architectures (Generator, no knn, relu, no dropout) (Discriminator, leaky, no dropout), no identity, 3C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-09 / 
+        --> weights:    2021-06-09 / 
+        --> results:    2021-06-09 / 
+
+        Original architectures (Generator, no knn, relu, no dropout) (Discriminator, leaky, no dropout), all loss functions, 1C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-09 / 
+        --> weights:    2021-06-09 / 
+        --> results:    2021-06-09 / 
+
+        Original architectures (Generator, no knn, relu, no dropout) (Discriminator, leaky, no dropout), all loss functions, 3C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-09 / 
+        --> weights:    2021-06-09 / 
+        --> results:    2021-06-09 / 
+
+    _________________________________
+
+    1.1 K-nn upsampling
+    _________________________________
+        
+        Original architectures (Generator, no knn, relu, no dropout) (Discriminator, leaky, no dropout), no identity, 1C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-09 / 
+        --> weights:    2021-06-09 / 
+        --> results:    2021-06-09 / 
+
+        Original architectures (Generator, no knn, relu, no dropout) (Discriminator, leaky, no dropout), no identity, 3C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-09 / 
+        --> weights:    2021-06-09 / 
+        --> results:    2021-06-09 / 
+
+        Original architectures (Generator, no knn, relu, no dropout) (Discriminator, leaky, no dropout), all loss functions, 1C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-09 / 
+        --> weights:    2021-06-09 / 
+        --> results:    2021-06-09 / 
+
+        Original architectures (Generator, no knn, relu, no dropout) (Discriminator, leaky, no dropout), all loss functions, 3C, || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-09 / 
+        --> weights:    2021-06-09 / 
+        --> results:    2021-06-09 / 
+
+
+
+
+___________________________________________________________
+
+3. DIML dataset
+___________________________________________________________
+
+    _________________________________
+
+    1.0 Original architecture
+    _________________________________
+
+        Original architectures (Generator, no knn, leaky relu, CC gradient penalty, no dropout) (Discriminator, leaky, no dropout), no identity loss functions, 3C,  || r-stereo, without noise_factor, without label_smoothing, without label_flipping, EP20, DL10
+        --> outputs:    2021-06-09 / 
+        --> weights:    2021-06-09 / 
+        --> results:    2021-06-09 / 
+
+
+
+
+
+
+
+
+
+_______________________________________________________________________________________
+
+Original network, r-stereo, with noise_factor, without label_smoothing, without label_flipping
+Original network, r-stereo, without noise_factor, with label_smoothing, without label_flipping
+Original network, r-stereo, without noise_factor, without label_smoothing, with label_flipping
+
+Original network, r-stereo, with noise_factor, with label_smoothing, without label_flipping
+Original network, r-stereo, with noise_factor, without label_smoothing, with label_flipping
+Original network, r-stereo, with noise_factor, with label_smoothing, with label_flipping
+
+Original network, r-stereo, without noise_factor, with label_smoothing, without label_flipping
+Original network, r-stereo, with noise_factor, with label_smoothing, without label_flipping
+Original network, r-stereo, without noise_factor, with label_smoothing, with label_flipping
+
+Original network, r-stereo, without noise_factor, without label_smoothing, with label_flipping
+Original network, r-stereo, with noise_factor, without label_smoothing, with label_flipping
+Original network, r-stereo, without noise_factor, with label_smoothing, with label_flipping
+
+_______________________________________________________________________________________
+
+Adjusted network, r-stereo, without noise_factor, without label_smoothing, without label_flipping
+
+Adjusted network, r-stereo, with noise_factor, without label_smoothing, without label_flipping
+Adjusted network, r-stereo, without noise_factor, with label_smoothing, without label_flipping
+Adjusted network, r-stereo, without noise_factor, without label_smoothing, with label_flipping
+
+Adjusted network, r-stereo, with noise_factor, with label_smoothing, without label_flipping
+Adjusted network, r-stereo, with noise_factor, without label_smoothing, with label_flipping
+Adjusted network, r-stereo, with noise_factor, with label_smoothing, with label_flipping
+
+Adjusted network, r-stereo, without noise_factor, with label_smoothing, without label_flipping
+Adjusted network, r-stereo, with noise_factor, with label_smoothing, without label_flipping
+Adjusted network, r-stereo, without noise_factor, with label_smoothing, with label_flipping
+
+Adjusted network, r-stereo, without noise_factor, without label_smoothing, with label_flipping
+Adjusted network, r-stereo, with noise_factor, without label_smoothing, with label_flipping
+Adjusted network, r-stereo, without noise_factor, with label_smoothing, with label_flipping
+
+_______________________________________________________________________________________
+
+Adjusted network, r-stereo, without noise_factor, without label_smoothing, without label_flipping
+
+Adjusted network, r-stereo, with noise_factor, without label_smoothing, without label_flipping
+Adjusted network, r-stereo, without noise_factor, with label_smoothing, without label_flipping
+Adjusted network, r-stereo, without noise_factor, without label_smoothing, with label_flipping
+
+Adjusted network, r-stereo, with noise_factor, with label_smoothing, without label_flipping
+Adjusted network, r-stereo, with noise_factor, without label_smoothing, with label_flipping
+Adjusted network, r-stereo, with noise_factor, with label_smoothing, with label_flipping
+
+Adjusted network, r-stereo, without noise_factor, with label_smoothing, without label_flipping
+Adjusted network, r-stereo, with noise_factor, with label_smoothing, without label_flipping
+Adjusted network, r-stereo, without noise_factor, with label_smoothing, with label_flipping
+
+Adjusted network, r-stereo, without noise_factor, without label_smoothing, with label_flipping
+Adjusted network, r-stereo, with noise_factor, without label_smoothing, with label_flipping
+Adjusted network, r-stereo, without noise_factor, with label_smoothing, with label_flipping
+
+_______________________________________________________________________________________
+
+Re-do without stereo input
+Re-do with synthesized stereo input
+
+Test without RGB colours
+Test without TransConv2D and use knn upsampling
+Test without cycle loss
+Test without identity loss
+
+#1 next test is to test without identity loss in 1C and 3C

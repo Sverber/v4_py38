@@ -108,8 +108,8 @@ def test(
 
         # Make required directories for testing
         try:
-            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "A"))
-            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "B"))
+            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "B2A"))
+            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "A2B"))
             if channels == 1:
                 os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "D"))
         except OSError:
@@ -152,8 +152,8 @@ def test(
 
             # Get image A and image B from a l2r dataset
             if dataset_group == "l2r":
-                real_image_A = data["left"].to(run.device)
-                real_image_B = data["right"].to(run.device)
+                real_image_A = data["A_left"].to(run.device)
+                real_image_B = data["A_right"].to(run.device)
 
             # Get image A and B from a s2d dataset
             elif dataset_group == "s2d":
@@ -244,20 +244,13 @@ def test(
             """ Define filepaths, save generated output and print a progress bar """
 
             # Filepath and filename for the real and generated output images
-            (
-                filepath_real_A,
-                filepath_real_B,
-                filepath_fake_A,
-                filepath_fake_B,
-                filepath_f_or_A,
-                filepath_f_or_B,
-            ) = (
-                f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}___real_sample.png",
-                f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}___real_sample.png",
-                f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}___fake_sample_MSE_{mse_loss_A:.5f}.png",
-                f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}___fake_sample_MSE_{mse_loss_B:.5f}.png",
-                f"{DIR_RESULTS}/{RUN_PATH}/A/{i + 1:04d}___fake_original_MSE_{mse_loss_f_or_A:.5f}.png",
-                f"{DIR_RESULTS}/{RUN_PATH}/B/{i + 1:04d}___fake_original_MSE_{mse_loss_f_or_B:.5f}.png",
+            (filepath_real_A, filepath_real_B, filepath_fake_A, filepath_fake_B, filepath_f_or_A, filepath_f_or_B,) = (
+                f"{DIR_RESULTS}/{RUN_PATH}/B2A/{i + 1:04d}___real_sample.png",
+                f"{DIR_RESULTS}/{RUN_PATH}/A2B/{i + 1:04d}___real_sample.png",
+                f"{DIR_RESULTS}/{RUN_PATH}/B2A/{i + 1:04d}___fake_sample_MSE_{mse_loss_A:.5f}.png",
+                f"{DIR_RESULTS}/{RUN_PATH}/A2B/{i + 1:04d}___fake_sample_MSE_{mse_loss_B:.5f}.png",
+                f"{DIR_RESULTS}/{RUN_PATH}/B2A/{i + 1:04d}___fake_original_MSE_{mse_loss_f_or_A:.5f}.png",
+                f"{DIR_RESULTS}/{RUN_PATH}/A2B/{i + 1:04d}___fake_original_MSE_{mse_loss_f_or_B:.5f}.png",
             )
 
             # Save real input images
@@ -295,7 +288,7 @@ def test(
 
                 # Convert grayscale to disparity map
                 np_real_image_B: np.ndarray = __convert_disparty(real_image_B.squeeze().cpu().numpy())
-                np_fake_image_A: np.ndarray = __convert_disparty(fake_image_A.squeeze().cpu().numpy())
+                np_fake_image_B: np.ndarray = __convert_disparty(fake_image_B.squeeze().cpu().numpy())
 
                 mse_disparity_real = mse(np_real_image_B, np_real_image_B)
 
@@ -308,12 +301,12 @@ def test(
 
                 # Save disparity maps
                 Image.fromarray(np_real_image_B).save(filepath_disparity_real)
-                Image.fromarray(np_fake_image_A).save(filepath_disparity_fake)
+                Image.fromarray(np_fake_image_B).save(filepath_disparity_fake)
                 vutils.save_image(real_image_A.detach(), filepath_input_sample, normalize=True)
 
                 # Convert to disparity tensor into the range [0,1]
                 disparity_image_real = 0.5 * (torch.tensor(np_real_image_B).data + 1.0)
-                disparity_image_fake = 0.5 * (torch.tensor(np_fake_image_A).data + 1.0)
+                disparity_image_fake = 0.5 * (torch.tensor(np_fake_image_B).data + 1.0)
 
                 # Calculate the mean square error (MSE) loss
                 mse_loss_disparity = mse_loss(disparity_image_fake, disparity_image_real)
@@ -349,7 +342,7 @@ def test(
     - Rewrite the variable names so that they correspond (again) with the ones I use in train.py
     - Clean up the code and remove unnecessary code
     
-""" 
+"""
 
 
 # Execute main code
@@ -359,22 +352,24 @@ if __name__ == "__main__":
 
         mydataloader = MyDataLoader()
 
+        channels = 1
+
         test(
             parameters=PARAMETERS,
-            dataset=mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "test", (68, 120), 1, False),
-            channels=1,
+            dataset=mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "test", (68, 120), channels, False),
+            channels=channels,
             #
             dataset_group=f"s2d",
             dataset_name=f"Test_Set_RGB_DISPARITY",
             extra_note="test",
-            #
+            # weights\s2d\Test_Set_RGB_DISPARITY\2021-05-13\23.33.29___EP300_DE100_LR0.0002_CH1
             model_group="s2d",
             model_folder="Test_Set_RGB_DISPARITY",
-            model_date=f"2021-05-10",
-            model_name=f"15.23.54___EP100_DE050_LR0.0002_CH1",
+            model_date=f"2021-05-26",
+            model_name=f"13.16.09___EP20_DE10_LRG0.0002_CH1",
             #
-            model_netG_A2B=f"net_G_A2B_epoch_90.pth",
-            model_netG_B2A=f"net_G_B2A_epoch_90.pth",
+            model_netG_A2B=f"net_G_A2B.pth",
+            model_netG_B2A=f"net_G_B2A.pth",
         )
 
     except KeyboardInterrupt:
