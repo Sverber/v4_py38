@@ -17,7 +17,8 @@ class Discriminator(nn.Module):
 
         self.kernel_size = (4, 4)  # originally (4, 4)
 
-        self.dropout2d = 0.5
+        self.dropout2d = 0.3 # according to TensorFlow docs on the DC-GAN
+        # https://www.tensorflow.org/tutorials/generative/dcgan
 
         self.main = nn.Sequential(
             #
@@ -27,32 +28,28 @@ class Discriminator(nn.Module):
                 in_channels=self.in_channels, out_channels=64, kernel_size=self.kernel_size, stride=2, padding=1
             ),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
-            # nn.ReLU(inplace=True),
-            nn.Dropout2d(self.dropout2d),
+            # nn.Dropout2d(self.dropout2d),
             #
             # Upsampling
             #
             nn.Conv2d(in_channels=64, out_channels=128, kernel_size=self.kernel_size, stride=2, padding=1),
             nn.InstanceNorm2d(num_features=128),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
-            # nn.ReLU(inplace=True),
-            nn.Dropout2d(self.dropout2d),
+            # nn.Dropout2d(self.dropout2d),
             #
             # Upsampling
             #
             nn.Conv2d(in_channels=128, out_channels=256, kernel_size=self.kernel_size, stride=2, padding=1),
             nn.InstanceNorm2d(num_features=256),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
-            # nn.ReLU(inplace=True),
-            nn.Dropout2d(self.dropout2d),
+            # nn.Dropout2d(self.dropout2d),
             #
             # Upsampling
             #
             nn.Conv2d(in_channels=256, out_channels=512, kernel_size=self.kernel_size, stride=2, padding=1),
             nn.InstanceNorm2d(num_features=512),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
-            # nn.ReLU(inplace=True),
-            nn.Dropout2d(self.dropout2d),
+            # nn.Dropout2d(self.dropout2d),
             #
             # Output layer
             #
@@ -90,29 +87,29 @@ class __Discriminator(nn.Module):
                 in_channels=self.in_channels, out_channels=64, kernel_size=self.kernel_size, stride=2, padding=1
             ),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
-            nn.Dropout2d(0.5),
+            # nn.Dropout2d(0.5),
             #
             # Upsampling
             #
             nn.Conv2d(in_channels=64, out_channels=128, kernel_size=self.kernel_size, stride=2, padding=1),
             nn.InstanceNorm2d(num_features=128),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
-            nn.Dropout2d(0.5),
+            # nn.Dropout2d(0.5),
             #
             # Upsampling
             #
             nn.Conv2d(in_channels=128, out_channels=256, kernel_size=self.kernel_size, stride=2, padding=1),
             nn.InstanceNorm2d(num_features=256),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
-            nn.Dropout2d(0.5),
+            # nn.Dropout2d(0.5),
             #
             # Upsampling
             #
             nn.Conv2d(256, 512, 4, padding=1),
             nn.InstanceNorm2d(num_features=512),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
-            nn.Dropout2d(0.5),
-            #
+            # nn.Dropout2d(0.5),
+            # #
             # Output layer
             #
             nn.Conv2d(in_channels=512, out_channels=self.out_channels, kernel_size=self.kernel_size, padding=1),

@@ -26,6 +26,7 @@ from datetime import datetime
 from itertools import product
 from collections import namedtuple
 from collections import OrderedDict
+from labml_helpers.module import Module
 
 
 from utils.classes.DecayLR import DecayLR
@@ -37,6 +38,20 @@ from utils.models.cycle.Discriminator import Discriminator
 
 # Clear the terminal
 os.system("cls")
+
+
+class GradientPenalty(Module):
+    def __call__(self, x: torch.Tensor, f: torch.Tensor):
+
+        batch_size = x.shape[0]
+
+        gradients, *_ = torch.autograd.grad(outputs=f, inputs=x, grad_outputs=f.new_ones(f.shape), create_graph=True)
+
+        gradients = gradients.reshape(batch_size, -1)
+
+        norm = gradients.norm(2, dim=-1)
+
+        return torch.mean((norm - 1) ** 2)
 
 
 class Epoch:
@@ -105,7 +120,7 @@ class RunTrainManager:
         self.loader = None
         self.validation_batch_index = None
         self.batch_is_validation = False
-        self.freq_update_discriminator = 5
+        self.freq_update_discriminator = 2
 
         # Runs
         self.runs = self.__build_cycle(parameters)
@@ -242,7 +257,6 @@ class RunTrainManager:
                     self.__add_discriminator_noise(run, epoch)
 
                     # Update discriminator networks
-                    # if i > 0 and i % self.freq_update_discriminator == 0:
                     self.__update_discriminators(i)
 
                     # Update MSE loss on generated images
@@ -414,7 +428,7 @@ class RunTrainManager:
 
     """ [ Private ] Functions to read- and adjust the training data """
 
-    def __random_flip(self, real_label: torch.Tensor, fake_label: torch.Tensor, probability: float = 0.1):
+    def __random_flip(self, real_label: torch.Tensor, fake_label: torch.Tensor, probability: float = 0.25):
 
         """ Randomly flip labels following a given probability """
 
@@ -425,7 +439,7 @@ class RunTrainManager:
         else:
             return fake_label, real_label
 
-    def __smooth_one_hot(self, true_label: torch.Tensor, classes: int, smoothing: float = 0.1):
+    def __smooth_one_hot(self, true_label: torch.Tensor, classes: int, smoothing: float = 0.25):
 
         """ Smoothen one-hot encoced labels y_ls = (1 - α) * y_hot + α / K """
 
@@ -454,6 +468,7 @@ class RunTrainManager:
             self.real_image_B = real_image_B
 
             # Add the left- and right into one image (image A)
+            # self.real_image_A = real_image_A_left
             self.real_image_A = torch.add(real_image_A_left, real_image_A_right)
 
             # Normalize again
@@ -479,15 +494,19 @@ class RunTrainManager:
         mean, std = 0.5, 0.5
 
         # Calculate until which epoch there is noise
-        noise_until_percentage = 0.90
+        self.NOISE_UNTIL_PERCENTAGE = 0.0  # default: 0.80
+        self.RANDOM_FLIP_PERCENTAGE = 0.0  # default: 0.10
+        self.SMOOTHENING_PERCENTAGE = 0.0  # default: 0.10
 
-        # Noise is gone at epoch 80, if the run is set to a 100 epochs
-        noise_until_epoch = noise_until_percentage * run.num_epochs
+        # Noise is gone at epoch x
+        noise_until_epoch = self.NOISE_UNTIL_PERCENTAGE * run.num_epochs
 
         # Calculate noise factor
-        if epoch > 0 and epoch <= int(round(run.num_epochs * noise_until_percentage)):
+        if self.NOISE_UNTIL_PERCENTAGE == 0:
+            self.noise_factor = 0
+        elif epoch > 0 and epoch <= int(round(run.num_epochs * self.NOISE_UNTIL_PERCENTAGE)):
             self.noise_factor = round(1 - (epoch / noise_until_epoch), 3)
-        elif epoch > int(round(run.num_epochs * noise_until_percentage)):
+        elif epoch > int(round(run.num_epochs * self.NOISE_UNTIL_PERCENTAGE)):
             self.noise_factor = 0
         else:
             self.noise_factor = 1
@@ -511,12 +530,12 @@ class RunTrainManager:
         """ Label smoothing and random flipping """
 
         # Smoothen the labels (only used by the discriminator)
-        self.real_smooth_label = self.__smooth_one_hot(self.real_label, 2, 0.1)
-        self.fake_smooth_label = self.__smooth_one_hot(self.fake_label, 2, 0.1)
+        self.real_smooth_label = self.__smooth_one_hot(self.real_label, 2, self.SMOOTHENING_PERCENTAGE)
+        self.fake_smooth_label = self.__smooth_one_hot(self.fake_label, 2, self.SMOOTHENING_PERCENTAGE)
 
         # Randomly flip the smooth labels (only used by the discriminator)
         self.real_smooth_label, self.fake_smooth_label = self.__random_flip(
-            self.real_smooth_label, self.fake_smooth_label, 0.10
+            self.real_smooth_label, self.fake_smooth_label, self.RANDOM_FLIP_PERCENTAGE
         )
 
         pass
@@ -550,35 +569,66 @@ class RunTrainManager:
 
         lambda_A2B = 10  # 10 by default
         lambda_B2A = 10  # 10 by default
-        lamba_identity = 0.0  # 0.5 by default, set to 0.0 because colour preservation is not important
+        lambda_id = 0.0  # 0.5 by default, set to 0.0 for s2d because colour preservation is not desired
 
-        # Lambda identity loss should not be used for s2d datasets (colour shouldn't be preseved in the result)
+        # Identity loss should not be used for s2d datasets (colour shouldn't be preseved in the result)
         if self.dataset_group == "s2d":
-            lamba_identity = 0.0
-        elif self.dataset_group == "l2r":
-            lamba_identity = 0.5
 
-        # G_B2A should be fed the real A
-        self.identity_image_B2A = self.net_G_B2A(self.real_image_A)
-        self.loss_identity_B2A = (
-            self.identity_loss(self.identity_image_B2A, self.real_image_A) * lambda_B2A * lamba_identity
-        )
+            self.loss_identity_B2A = 0
+            self.loss_identity_A2B = 0
 
-        # G_A2B should be fed the real B
-        self.identity_image_A2B = self.net_G_A2B(self.real_image_B)
-        self.loss_identity_A2B = (
-            self.identity_loss(self.identity_image_A2B, self.real_image_B) * lambda_A2B * lamba_identity
-        )
+        elif lambda_id == 0.0:
+
+            self.loss_identity_B2A = 0
+            self.loss_identity_A2B = 0
+
+        else:
+
+            # G_B2A should be fed the real A
+            self.identity_image_B2A = self.net_G_B2A(self.real_image_A)
+            self.loss_identity_B2A = (
+                self.identity_loss(self.identity_image_B2A, self.real_image_A) * lambda_B2A * lambda_id
+            )
+
+            # G_A2B should be fed the real B
+            self.identity_image_A2B = self.net_G_A2B(self.real_image_B)
+            self.loss_identity_A2B = (
+                self.identity_loss(self.identity_image_A2B, self.real_image_B) * lambda_A2B * lambda_id
+            )
 
         """ Cycle loss, re-generates the original input image. So: A -> B -> A and B -> A -> B """
 
+        # Apply a gradient penalty to the cycle consistency-loss
+        # Check if done, read 3.3 https://ssnl.github.io/better_cycles/report.pdf
+
+        gradient_penalty = GradientPenalty()
+
+        self.gradient_penalty_A = gradient_penalty(self.generated_image_B2A, self.generated_output_A)
+        self.gradient_penalty_B = gradient_penalty(self.generated_image_A2B, self.generated_output_B)
+
+        """
+        # Thought experiment:
+        # Given the outputs: A = 0.25; B = 0.15; C = 0.05
+
+        # A: 0.25 * 10 * 0.40 = 1.000
+        # B: 0.15 * 10 * 0.30 = 0.750
+        # C: 0.05 * 10 * 0.25 = 0.125 --> loss, ergo the difference is low, thus..
+
+        """
+
         # Cycle loss: A -> B -> A
         self.recovered_image_A = self.net_G_B2A(self.generated_image_A2B)
-        self.loss_cycle_ABA = self.cycle_loss(self.recovered_image_A, self.real_image_A) * lambda_A2B
+        self.loss_cycle_ABA = (
+            self.cycle_loss(self.recovered_image_A, self.real_image_A) * lambda_A2B 
+            # * self.gradient_penalty_B
+        )
 
         # Cycle loss: B -> A -> B
         self.recovered_image_B = self.net_G_A2B(self.generated_image_B2A)
-        self.loss_cycle_BAB = self.cycle_loss(self.recovered_image_B, self.real_image_B) * lambda_B2A
+        self.loss_cycle_BAB = (
+            self.cycle_loss(self.recovered_image_B, self.real_image_B) * lambda_B2A 
+            # * self.gradient_penalty_A
+        )
 
         """ Calculate the generator errors """
 
@@ -761,19 +811,23 @@ class RunTrainManager:
         if self.batch_is_validation == False:
 
             self.progress_bar.set_description(
-                f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}]  ||  "
+                f"[{self.dataset_group.upper()}][{epoch + 1}/{run.num_epochs}][{i + 1}/{len(self.loader)}]"
+                f"[{self.noise_factor:.2f}|{self.SMOOTHENING_PERCENTAGE:.2f}|{self.RANDOM_FLIP_PERCENTAGE:.2f}]  ||  "
                 #
                 # Network adversarial losses
-                f"Avg. adv. losses:  "
+                # f"gp_B: {self.gradient_penalty_B:.3f} ; "
+                # f"cc_ABA: {self.loss_cycle_ABA:.3f} ; "
+                # f"cc_gp_B: {(self.loss_cycle_ABA*self.gradient_penalty_B):.3f}  ||  "
+                f"Avg. error:  "
                 f"D_A: {self.avg_error_D_A:.3f} ; "
                 f"D_B: {self.avg_error_D_B:.3f}  ||  "
                 f"G_A2B: {self.avg_error_G_A2B_adv_loss:.3f} ; "
                 f"G_B2A: {self.avg_error_G_B2A_adv_loss:.3f}  ||  "
-                #  
-                # Loss difference between the networks
-                f"Avg. loss differences:  "
-                f"A2B_B: {(self.avg_error_G_A2B_adv_loss - self.avg_error_D_B):.3f} ; "
-                f"B2A_A: {(self.avg_error_G_B2A_adv_loss - self.avg_error_D_A):.3f}  ||  "
+                #
+                # # Loss difference between the networks
+                # f"Diff.: "
+                # f"A2B_B: {(self.avg_error_G_A2B_adv_loss - self.avg_error_D_B):.3f} ; "
+                # f"B2A_A: {(self.avg_error_G_B2A_adv_loss - self.avg_error_D_A):.3f}  ||  "
                 #
                 # Total losses
                 # f"loss_G_A2B: {self.avg_error_G_A2B:.3f} ; "
@@ -788,7 +842,7 @@ class RunTrainManager:
         else:
 
             self.progress_bar.set_description(
-                f"[{self.dataset_group.upper()}][{epoch}/{run.num_epochs}][{i + 1}/{len(self.loader)}][nf={self.noise_factor:.3f}]  ||  "
+                f"[{self.dataset_group.upper()}][{epoch + 1}/{run.num_epochs}][{i + 1}/{len(self.loader)}][nf={self.noise_factor:.3f}]  ||  "
                 f"v__avg_error_D_A: {self.v__avg_error_D_A:.3f} ; "
                 f"v__avg_error_D_B: {self.v__avg_error_D_B:.3f}  || "
                 f"v__avg_error_G_A2B: {self.v__avg_error_G_A2B:.3f} ; "
@@ -894,16 +948,18 @@ class RunTrainManager:
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/A2B_real_image_A_stereo.png",
                 normalize=True,
             )
-            vutils.save_image(
-                self.real_image_A_left.detach(),
-                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/A2B_real_image_A_left.png",
-                normalize=True,
-            )
-            vutils.save_image(
-                self.real_image_A_right.detach(),
-                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/A2B_real_image_A_right.png",
-                normalize=True,
-            )
+
+            if self.dataset_group == "s2d":
+                vutils.save_image(
+                    self.real_image_A_left.detach(),
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/A2B_real_image_A_left.png",
+                    normalize=True,
+                )
+                vutils.save_image(
+                    self.real_image_A_right.detach(),
+                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/A2B_real_image_A_right.png",
+                    normalize=True,
+                )
 
         pass
 
@@ -1041,8 +1097,8 @@ class RunTrainManager:
             self.per_batch_figure, self.per_batch_axes = plt.subplots(4, 1, figsize=(8, 12))
 
             # Set titles
-            self.per_batch_axes[0].set_title(f"Total loss of generators A2B & B2A (epoch {epoch})")
-            self.per_batch_axes[1].set_title(f"Total loss of discriminators A & B (epoch {epoch})")
+            self.per_batch_axes[0].set_title(f"Adversarial loss of generators A2B & B2A (epoch {epoch})")
+            self.per_batch_axes[1].set_title(f"Adversarial loss of discriminators A & B (epoch {epoch})")
             self.per_batch_axes[2].set_title(f"Adversarial loss of Generator A2B and Discriminator B (epoch {epoch})")
             self.per_batch_axes[3].set_title(f"Adversarial loss of Generator B2A and Discriminator A (epoch {epoch})")
 
@@ -1059,10 +1115,10 @@ class RunTrainManager:
             self.per_batch_axes[3].grid()
 
             # Plot generator values
-            self.per_batch_axes[0].plot(self.batch_losses_G_A2B, label="Total loss G_A2B", color="tab:blue")
-            self.per_batch_axes[0].plot(self.batch_losses_G_B2A, label="Total loss G_B2A", color="tab:orange")
-            # self.per_batch_axes[0].plot(self.batch_losses_G_A2B_adv, label="Adv. loss G_A2B", color="tab:blue")
-            # self.per_batch_axes[0].plot(self.batch_losses_G_B2A_adv, label="Adv. loss G_B2A", color="tab:orange")
+            # self.per_batch_axes[0].plot(self.batch_losses_G_A2B, label="Total loss G_A2B", color="tab:blue")
+            # self.per_batch_axes[0].plot(self.batch_losses_G_B2A, label="Total loss G_B2A", color="tab:orange")
+            self.per_batch_axes[0].plot(self.batch_losses_G_A2B_adv, label="Adv. loss G_A2B", color="tab:blue")
+            self.per_batch_axes[0].plot(self.batch_losses_G_B2A_adv, label="Adv. loss G_B2A", color="tab:orange")
 
             # Plot discriminator values
             self.per_batch_axes[1].plot(self.batch_losses_D_A, label="D_A", color="tab:blue")
@@ -1122,8 +1178,12 @@ class RunTrainManager:
 
         # self.per_batch_axes[0].set_title(f"Total loss of generator A2B & B2A (epoch {epoch})")
         # Set titles
-        self.per_epoch_axes[0].set_title(f"The total losses and adversarial losses of Generators A2B & B2A (during training)")
-        self.per_epoch_axes[1].set_title(f"The total losses (adversarial) losses of Discriminators A & B (during training)")
+        self.per_epoch_axes[0].set_title(
+            f"The total losses and adversarial losses of Generators A2B & B2A (during training)"
+        )
+        self.per_epoch_axes[1].set_title(
+            f"The total losses (adversarial) losses of Discriminators A & B (during training)"
+        )
         self.per_epoch_axes[2].set_title(f"Decaying noise factor during training")
         self.per_epoch_axes[3].set_title(f"Average MSE losses of the generated images during training")
 
@@ -1180,6 +1240,7 @@ class RunTrainManager:
         """ Create the required directories to store the output data/images """
 
         if dir == "outputs":
+            print(path)
             try:
                 os.makedirs(os.path.join(path, "realtime"))
                 os.makedirs(os.path.join(path, "logs"))
@@ -1230,11 +1291,11 @@ PARAMETERS: OrderedDict = OrderedDict(
     shuffle=[True],
     num_workers=[8],
     manualSeed=[999],
-    learning_rate_dis=[0.0003],
-    learning_rate_gen=[0.0001],
+    learning_rate_dis=[0.0002],
+    learning_rate_gen=[0.0002],
     batch_size=[1],
-    num_epochs=[300],
-    decay_epochs=[100],
+    num_epochs=[20],
+    decay_epochs=[10],
 )
 
 
@@ -1248,35 +1309,21 @@ if __name__ == "__main__":
 
         mydataloader = MyDataLoader()
 
-        """ Train a [L2R] model on the GRAYSCALE dataset """
+        channels = 1
+        group = "s2d"
 
-        # l2r_dataset_train_GRAYSCALE = mydataloader.get_dataset("l2r", "Test_Set_GRAYSCALE", "train", (68, 120), 1, True)
-        # l2r_manager_GRAYSCALE = RunTrainManager(l2r_dataset_train_GRAYSCALE, 1, PARAMETERS)
-        # l2r_manager_GRAYSCALE.start_cycle()
+        dataset = mydataloader.get_dataset(group, "Test_Set_RGB_DISPARITY", "train", (68, 120), channels, False)
+        manager = RunTrainManager(dataset, channels, PARAMETERS)
+        manager.start_cycle()
 
-        """ Train a [L2R] model on the RGB dataset """
+        # Test_Set,     originally (1242, 2208),    train at (68, 120)
+        # DIODE,        originally (1024, 768),     train at (40, 54)
+        # DIML,         originally (384, 640),      train at (64, 106)
 
-        # l2r_dataset_train_RGB = mydataloader.get_dataset("l2r", "Test_Set_RGB", "train", (68, 120), 1, True)
-        # l2r_manager_RGB = RunTrainManager(l2r_dataset_train_RGB, 1, PARAMETERS)
-        # l2r_manager_RGB.start_cycle()
-
-        """ Train a [S2D] model on the GRAYSCALE dataset """
-
-        # s2d_dataset_train_GRAYSCALE = mydataloader.get_dataset("s2d", "Test_Set_GRAYSCALE", "train", (68, 120), 1, False)
-        # s2d_manager_GRAYSCALE = RunTrainManager(s2d_dataset_train_GRAYSCALE, 1, PARAMETERS)
-        # s2d_manager_GRAYSCALE.start_cycle()
-
-        """ Train a [S2D] model on the RGB dataset """
-
-        # s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (68, 120), 3, False)
-        # s2d_manager_RGB = RunTrainManager(s2d_dataset_train_RGB, 3, PARAMETERS)
-        # s2d_manager_RGB.start_cycle()
-
-        """ Train a [S2D] model on the Test_Set_RGB_DISPARITY dataset """
-
-        s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (68, 120), 1, False)
-        s2d_manager_RGB = RunTrainManager(s2d_dataset_train_RGB, 1, PARAMETERS)
-        s2d_manager_RGB.start_cycle()
+        # DIML DATASET
+        # dataset = mydataloader.get_dataset("s2d", "DIML", "test_disparity", (64, 106), channels, False)
+        # manager = RunTrainManager(dataset, channels, PARAMETERS)
+        # manager.start_cycle()
 
     except KeyboardInterrupt:
         try:

@@ -46,6 +46,30 @@ class StereoDisparityDataset(Dataset):
         # For every not-RGB image, convert to RGB and save again
         for i, filepath in enumerate(files):
 
+            print(i, filepath)
+
+            try:
+                # Open image, transform to tensor
+                transform_tensor = transforms.Compose([transforms.ToTensor()])
+                image_rgb_tensor = transform_tensor(Image.open(filepath))
+
+                if i == 0:
+                    print("image_rgb_tensor.shape[0]:", image_rgb_tensor.shape[0])
+
+                # Check channels and if not 3 (RGB), convert to RGB and save
+                if image_rgb_tensor.shape[0] != 3:
+                    print(f"- Found a non-RGB '{image_type}' image, converting it to a 3 CHANNEL RGB image.")
+                    image_rgb = Image.open(filepath).convert("RGB")
+                    image_rgb.save(filepath)
+
+            except Exception as e:
+                raise Exception(e)
+
+    def __transform_CHANNELS2RGB(self, files, image_type) -> List:
+
+        # For every not-RGB image, convert to RGB and save again
+        for i, filepath in enumerate(files):
+
             try:
                 # Open image, transform to tensor
                 transform_tensor = transforms.Compose([transforms.ToTensor()])
@@ -101,6 +125,8 @@ class StereoDisparityDataset(Dataset):
 
         item_A_l = self.transforms(Image.open(self.stereo_l[index % len(self.stereo_l)]))
         item_A_r = self.transforms(Image.open(self.stereo_r[index % len(self.stereo_r)]))
+
+        print(self.disparity[index % len(self.disparity)])
         disparity = self.transforms(Image.open(self.disparity[index % len(self.disparity)]))
 
         return {"A_left": item_A_l, "A_right": item_A_r, "B": disparity}
