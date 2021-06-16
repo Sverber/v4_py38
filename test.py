@@ -243,15 +243,15 @@ def test(
             # Calculate the average mean square error (MSE) for the fake originals A and B
             avg_mse_loss_f_or_A = cum_mse_loss_f_or_A / (i + 1)
             avg_mse_loss_f_or_B = cum_mse_loss_f_or_B / (i + 1)
-            
+
             """ Calculate FID scores """
-            
+
             def calculate_fid(act1, act2):
                 # calculate mean and covariance statistics
                 mu1, sigma1 = act1.mean(axis=0), cov(act1, rowvar=False)
                 mu2, sigma2 = act2.mean(axis=0), cov(act2, rowvar=False)
                 # calculate sum squared difference between means
-                ssdiff = np.sum((mu1 - mu2)**2.0)
+                ssdiff = np.sum((mu1 - mu2) ** 2.0)
                 # calculate sqrt of product between cov
                 covmean = sqrtm(sigma1.dot(sigma2))
                 # check and correct imaginary numbers from sqrt
@@ -271,11 +271,11 @@ def test(
             fid_score_A = calculate_fid(np_fake_image_A, np_real_image_A)
             fid_score_B = calculate_fid(np_fake_image_B, np_real_image_B)
 
-            # Calculate the cumulative FID score 
+            # Calculate the cumulative FID score
             cum_fid_score_A += fid_score_A
             cum_fid_score_B += fid_score_B
 
-            # Calculate the average FID score 
+            # Calculate the average FID score
             avg_fid_score_A = cum_fid_score_A / (i + 1)
             avg_fid_score_B = cum_fid_score_B / (i + 1)
 
@@ -302,7 +302,6 @@ def test(
             # Save generated (fake) original images
             vutils.save_image(fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
             vutils.save_image(fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
-            
             """ Save data for FID evaluation """
 
             # Filepath for A2B real and fake images
@@ -402,6 +401,8 @@ def test(
         print("MSE score fake_images_B:", avg_mse_loss_B)
         print("FID score fake_images_A:", avg_fid_score_A)
         print("FID score fake_images_B:", avg_fid_score_B)
+        # print("MSE(avg) fake_original_image_A:", avg_mse_loss_f_or_A)
+        # print("MSE(avg) fake_original_image_B:", avg_mse_loss_f_or_B)
 
     pass
 
