@@ -27,6 +27,11 @@ from utils.classes.dataloaders import MyDataLoader
 from utils.classes.RunCycleBuilder import RunCycleBuilder
 from utils.models.cycle.Generators import Generator
 
+from numpy import cov
+from numpy import trace
+from numpy import iscomplexobj
+from numpy.random import random
+from scipy.linalg import sqrtm
 
 # Clear the terminal
 os.system("cls")
@@ -96,6 +101,14 @@ def test(
         try:
             os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "B2A"))
             os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "A2B"))
+            #
+            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "FID", "A2B"))
+            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "FID", "A2B", "real"))
+            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "FID", "A2B", "fake"))
+            #
+            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "FID", "B2A"))
+            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "FID", "B2A", "real"))
+            os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "FID", "B2A", "fake"))
             if channels == 1:
                 os.makedirs(os.path.join(DIR_RESULTS, RUN_PATH, "D"))
         except OSError:
@@ -131,6 +144,10 @@ def test(
         avg_mse_loss_A, avg_mse_loss_B, avg_mse_loss_f_or_A, avg_mse_loss_f_or_B = 0, 0, 0, 0
         cum_mse_loss_A, cum_mse_loss_B, cum_mse_loss_f_or_A, cum_mse_loss_f_or_B = 0, 0, 0, 0
 
+        # Initiate FID score variables
+        avg_fid_score_A, avg_fid_score_B = 0, 0
+        cum_fid_score_A, cum_fid_score_B = 0, 0
+
         # Iterate over the data
         for i, data in progress_bar:
 
@@ -138,8 +155,8 @@ def test(
 
             # Get image A and image B from a l2r dataset
             if dataset_group == "l2r":
-                real_image_A = data["A_left"].to(run.device)
-                real_image_B = data["A_right"].to(run.device)
+                real_image_A = data["left"].to(run.device)
+                real_image_B = data["right"].to(run.device)
 
             # Get image A and B from a s2d dataset
             elif dataset_group == "s2d":
@@ -202,8 +219,8 @@ def test(
             )
 
             # Calculate the mean square error (MSE) loss
-            mse_loss_A = mse(np_fake_image_A, np_real_image_B)
-            mse_loss_B = mse(np_fake_image_B, np_real_image_A)
+            mse_loss_A = mse(np_fake_image_A, np_real_image_A)
+            mse_loss_B = mse(np_fake_image_B, np_real_image_B)
 
             # Calculate the sum of all mean square error (MSE) losses
             cum_mse_loss_A += mse_loss_A
@@ -226,6 +243,41 @@ def test(
             # Calculate the average mean square error (MSE) for the fake originals A and B
             avg_mse_loss_f_or_A = cum_mse_loss_f_or_A / (i + 1)
             avg_mse_loss_f_or_B = cum_mse_loss_f_or_B / (i + 1)
+            
+            """ Calculate FID scores """
+            
+            def calculate_fid(act1, act2):
+                # calculate mean and covariance statistics
+                mu1, sigma1 = act1.mean(axis=0), cov(act1, rowvar=False)
+                mu2, sigma2 = act2.mean(axis=0), cov(act2, rowvar=False)
+                # calculate sum squared difference between means
+                ssdiff = np.sum((mu1 - mu2)**2.0)
+                # calculate sqrt of product between cov
+                covmean = sqrtm(sigma1.dot(sigma2))
+                # check and correct imaginary numbers from sqrt
+                if iscomplexobj(covmean):
+                    covmean = covmean.real
+                # calculate score
+                fid = ssdiff + trace(sigma1 + sigma2 - 2.0 * covmean)
+                return fid
+
+            # # define two collections of activations
+            # act1 = random(10*2048)
+            # act1 = act1.reshape((10,2048))
+            # act2 = random(10*2048)
+            # act2 = act2.reshape((10,2048))
+
+            # Calculate the mean square error (MSE) loss
+            fid_score_A = calculate_fid(np_fake_image_A, np_real_image_A)
+            fid_score_B = calculate_fid(np_fake_image_B, np_real_image_B)
+
+            # Calculate the cumulative FID score 
+            cum_fid_score_A += fid_score_A
+            cum_fid_score_B += fid_score_B
+
+            # Calculate the average FID score 
+            avg_fid_score_A = cum_fid_score_A / (i + 1)
+            avg_fid_score_B = cum_fid_score_B / (i + 1)
 
             """ Define filepaths, save generated output and print a progress bar """
 
@@ -250,27 +302,49 @@ def test(
             # Save generated (fake) original images
             vutils.save_image(fake_original_image_A.detach(), filepath_f_or_A, normalize=True)
             vutils.save_image(fake_original_image_B.detach(), filepath_f_or_B, normalize=True)
+            
+            """ Save data for FID evaluation """
 
-            """ Convert to disparity maps """
+            # Filepath for A2B real and fake images
+            filepath_FID_A2B_REAL, filepath_FID_A2B_FAKE = (
+                f"{DIR_RESULTS}/{RUN_PATH}/FID/A2B/real/{i + 1:04d}___real_sample.png",
+                f"{DIR_RESULTS}/{RUN_PATH}/FID/B2A/fake/{i + 1:04d}___fake_sample_MSE_{mse_loss_A:.5f}.png",
+            )
 
-            def __convert_disparty(image_np) -> np.ndarray:
+            # Filepath for B2A real and fake images
+            filepath_FID_B2A_REAL, filepath_FID_B2A_FAKE = (
+                f"{DIR_RESULTS}/{RUN_PATH}/FID/B2A/real/{i + 1:04d}___real_sample.png",
+                f"{DIR_RESULTS}/{RUN_PATH}/FID/A2B/fake/{i + 1:04d}___fake_sample_MSE_{mse_loss_B:.5f}.png",
+            )
 
-                vmin = image_np.min()
-                vmax = np.percentile(image_np, 100)
+            # Save real images of domain A
+            vutils.save_image(real_image_A.detach(), filepath_FID_B2A_REAL, normalize=True)
+            vutils.save_image(fake_image_A.detach(), filepath_FID_B2A_FAKE, normalize=True)
 
-                # cmaps = [ 'viridis', 'plasma', 'inferno', 'magma', 'cividis']
+            # Save real images of domain B
+            vutils.save_image(real_image_B.detach(), filepath_FID_A2B_REAL, normalize=True)
+            vutils.save_image(fake_image_B.detach(), filepath_FID_A2B_FAKE, normalize=True)
 
-                # Normalize using the provided cmap
-                normalizer = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
-                mapper = cm.ScalarMappable(norm=normalizer, cmap="magma")
-                colormapped_im = (mapper.to_rgba(image_np)[:, :, :3] * 255).astype(np.uint8)
+            """ Convert to disparity maps if only 1 CHANNEL and datagroup is S2D """
 
-                # Convert to PIL and return np.ndarray
-                image_target = PIL.fromarray(colormapped_im)
+            if channels == 1 and dataset_group == "s2d":
 
-                return np.array(image_target)
+                def __convert_disparty(image_np) -> np.ndarray:
 
-            if channels == 1:
+                    vmin = image_np.min()
+                    vmax = np.percentile(image_np, 100)
+
+                    # cmaps = [ 'viridis', 'plasma', 'inferno', 'magma', 'cividis']
+
+                    # Normalize using the provided cmap
+                    normalizer = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+                    mapper = cm.ScalarMappable(norm=normalizer, cmap="magma")
+                    colormapped_im = (mapper.to_rgba(image_np)[:, :, :3] * 255).astype(np.uint8)
+
+                    # Convert to PIL and return np.ndarray
+                    image_target = PIL.fromarray(colormapped_im)
+
+                    return np.array(image_target)
 
                 # Convert grayscale to disparity map
                 np_real_image_B: np.ndarray = __convert_disparty(real_image_B.squeeze().cpu().numpy())
@@ -303,25 +377,33 @@ def test(
             progress_bar.set_description(
                 f"Process images {i + 1} of {len(loader)}  ||  "
                 f"avg_mse_loss_A: {avg_mse_loss_A:.3f} ; avg_mse_loss_B: {avg_mse_loss_B:.3f} ||  "
-                f"avg_mse_loss_f_or_A: {avg_mse_loss_f_or_A:.3f} ; avg_mse_loss_f_or_B: {avg_mse_loss_f_or_B:.3f} ||  "
+                # f"avg_mse_loss_f_or_A: {avg_mse_loss_f_or_A:.3f} ; avg_mse_loss_f_or_B: {avg_mse_loss_f_or_B:.3f} ||  "
+                f"avg_fid_score_A: {avg_fid_score_A:.3f} ; avg_fid_score_B: {avg_fid_score_B:.3f}   "
             )
 
-        # Calculate average mean squared error (MSE)
-        avg_mse_loss_A = cum_mse_loss_A / len(loader)
-        avg_mse_loss_B = cum_mse_loss_B / len(loader)
+        """ Store evaluation in a .txt file """
 
-        # Calculate average mean squared error (MSE)
-        avg_mse_loss_f_or_A = cum_mse_loss_f_or_A / len(loader)
-        avg_mse_loss_f_or_B = cum_mse_loss_f_or_B / len(loader)
+        # Create text file
+        f = open(f"{DIR_RESULTS}/{RUN_PATH}/evaluation.txt", "w+")
+
+        # Add line to text file
+        f.write(f"MSE score fake_images_A: {avg_mse_loss_A:.3f}")
+        f.write(f"MSE score fake_images_B: {avg_mse_loss_B:.3f}")
+        f.write(f"FID score fake_images_A: {avg_fid_score_A:.3f}")
+        f.write(f"FID score fake_images_B: {avg_fid_score_B:.3f}")
+
+        # Close file
+        f.close()
+
+        """ Print evaluation """
 
         # Print
-        print("MSE(avg) fake_image_A:", avg_mse_loss_A)
-        print("MSE(avg) fake_image_B:", avg_mse_loss_B)
-        print("MSE(avg) fake_original_image_A:", avg_mse_loss_f_or_A)
-        print("MSE(avg) fake_original_image_B:", avg_mse_loss_f_or_B)
+        print("MSE score fake_images_A:", avg_mse_loss_A)
+        print("MSE score fake_images_B:", avg_mse_loss_B)
+        print("FID score fake_images_A:", avg_fid_score_A)
+        print("FID score fake_images_B:", avg_fid_score_B)
 
     pass
-
 
 
 # Parameters
@@ -345,20 +427,21 @@ if __name__ == "__main__":
         mydataloader = MyDataLoader()
 
         channels = 1
+        group = "s2d"
 
         test(
             parameters=PARAMETERS,
-            dataset=mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "test", (68, 120), channels, False),
+            dataset=mydataloader.get_dataset(group, "Test_Set_RGB_DISPARITY", "test", (68, 120), channels, False),
             channels=channels,
             #
-            dataset_group=f"s2d",
+            dataset_group=group,
             dataset_name=f"Test_Set_RGB_DISPARITY",
             extra_note="test",
-            # weights\s2d\Test_Set_RGB_DISPARITY\2021-05-13\23.33.29___EP300_DE100_LR0.0002_CH1
-            model_group="s2d",
+            #
+            model_group=group,
             model_folder="Test_Set_RGB_DISPARITY",
-            model_date=f"2021-06-09",
-            model_name=f"01.57.44___EP20_DE10_LRG0.0002_CH1",
+            model_date=f"2021-06-16",
+            model_name=f"19.09.05___EP20_DE10_LRG0.0002_CH1",
             #
             model_netG_A2B=f"net_G_A2B.pth",
             model_netG_B2A=f"net_G_B2A.pth",

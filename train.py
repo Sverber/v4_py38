@@ -494,9 +494,9 @@ class RunTrainManager:
         mean, std = 0.5, 0.5
 
         # Calculate until which epoch there is noise
-        self.NOISE_UNTIL_PERCENTAGE = 0.8  # default: 0.80
-        self.RANDOM_FLIP_PERCENTAGE = 0.1  # default: 0.10
-        self.SMOOTHENING_PERCENTAGE = 0.1  # default: 0.10
+        self.NOISE_UNTIL_PERCENTAGE = 0.0  # default: 0.80
+        self.RANDOM_FLIP_PERCENTAGE = 0.0  # default: 0.10
+        self.SMOOTHENING_PERCENTAGE = 0.0  # default: 0.10
 
         # Noise is gone at epoch x
         noise_until_epoch = self.NOISE_UNTIL_PERCENTAGE * run.num_epochs
@@ -569,10 +569,15 @@ class RunTrainManager:
 
         lambda_A2B = 10  # 10 by default
         lambda_B2A = 10  # 10 by default
-        lambda_id = 0.5  # 0.5 by default, set to 0.0 for s2d because colour preservation is not desired
+        lambda_id = 0.0  # 0.5 by default, set to 0.0 for s2d because colour preservation is not desired
 
         # Identity loss should not be used for s2d datasets (colour shouldn't be preseved in the result)
         if self.dataset_group == "s2d":
+
+            self.loss_identity_B2A = 0
+            self.loss_identity_A2B = 0
+
+        elif lambda_id == 0.0:
 
             self.loss_identity_B2A = 0
             self.loss_identity_A2B = 0
@@ -1304,46 +1309,21 @@ if __name__ == "__main__":
 
         mydataloader = MyDataLoader()
 
-        """ Train a [L2R] model on the GRAYSCALE dataset """
+        channels = 1
+        group = "s2d"
 
-        # l2r_dataset_train_GRAYSCALE = mydataloader.get_dataset("l2r", "Test_Set_GRAYSCALE", "train", (68, 120), 1, True)
-        # l2r_manager_GRAYSCALE = RunTrainManager(l2r_dataset_train_GRAYSCALE, 1, PARAMETERS)
-        # l2r_manager_GRAYSCALE.start_cycle()
-
-        """ Train a [L2R] model on the RGB dataset """
-
-        # l2r_dataset_train_RGB = mydataloader.get_dataset("l2r", "Test_Set_RGB", "train", (68, 120), 1, True)
-        # l2r_manager_RGB = RunTrainManager(l2r_dataset_train_RGB, 1, PARAMETERS)
-        # l2r_manager_RGB.start_cycle()
-
-        """ Train a [S2D] model on the GRAYSCALE dataset """
-
-        # s2d_dataset_train_GRAYSCALE = mydataloader.get_dataset("s2d", "Test_Set_GRAYSCALE", "train", (68, 120), 1, False)
-        # s2d_manager_GRAYSCALE = RunTrainManager(s2d_dataset_train_GRAYSCALE, 1, PARAMETERS)
-        # s2d_manager_GRAYSCALE.start_cycle()
-
-        """ Train a [S2D] model on the RGB dataset """
-
-        # s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (68, 120), 3, False)
-        # s2d_manager_RGB = RunTrainManager(s2d_dataset_train_RGB, 3, PARAMETERS)
-        # s2d_manager_RGB.start_cycle()
-
-        """ Train a [S2D] model on the Test_Set_RGB_DISPARITY dataset """
-
-        channels = 3
-
-        s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "Test_Set_RGB_DISPARITY", "train", (68, 120), channels, False)
-        s2d_manager_RGB = RunTrainManager(s2d_dataset_train_RGB, channels, PARAMETERS)
-        s2d_manager_RGB.start_cycle()
+        dataset = mydataloader.get_dataset(group, "Test_Set_RGB_DISPARITY", "train", (68, 120), channels, False)
+        manager = RunTrainManager(dataset, channels, PARAMETERS)
+        manager.start_cycle()
 
         # Test_Set,     originally (1242, 2208),    train at (68, 120)
         # DIODE,        originally (1024, 768),     train at (40, 54)
         # DIML,         originally (384, 640),      train at (64, 106)
 
         # DIML DATASET
-        # s2d_dataset_train_RGB = mydataloader.get_dataset("s2d", "DIML", "test_disparity", (64, 106), channels, False)
-        # s2d_manager_RGB = RunTrainManager(s2d_dataset_train_RGB, channels, PARAMETERS)
-        # s2d_manager_RGB.start_cycle()
+        # dataset = mydataloader.get_dataset("s2d", "DIML", "test_disparity", (64, 106), channels, False)
+        # manager = RunTrainManager(dataset, channels, PARAMETERS)
+        # manager.start_cycle()
 
     except KeyboardInterrupt:
         try:
