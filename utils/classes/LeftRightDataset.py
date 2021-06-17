@@ -61,7 +61,7 @@ class LeftRightDataset(Dataset):
             try:
                 # Open image, transform to tensor
                 transform_tensor = transforms.Compose([transforms.ToTensor()])
-                image_rgb_tensor = transform_tensor(Image.open(filepath))
+                grayscale_tensor = transform_tensor(Image.open(filepath))
 
                 # Check channels and if not 3 (RGB), convert to RGB and save
                 if grayscale_tensor.shape[0] != 1:
@@ -83,4 +83,3 @@ class LeftRightDataset(Dataset):
 
     def __len__(self):
         return max(len(self.stereo_l), len(self.stereo_r))
-

@@ -6,6 +6,7 @@ import sys
 import glob
 import time
 import random
+import pprint
 import numpy as np
 
 import torch
@@ -14,6 +15,7 @@ from torch.utils import data
 import torchvision.transforms as transforms
 
 from torch.utils.data import Dataset
+from collections import OrderedDict
 
 from PIL import Image
 from torchvision.transforms.transforms import CenterCrop
@@ -298,7 +300,9 @@ class MyDataLoader:
         if square_size[0] % 4 == 0:
             print("- [MyDataLoader] | Square image size is divisable by 4, ok. Continue")
         else:
-            raise Exception(f"- [MyDataLoader] | The square_size (image_size) is not divisable by 4! See: {square_size}")
+            raise Exception(
+                f"- [MyDataLoader] | The square_size (image_size) is not divisable by 4! See: {square_size}"
+            )
 
         transforms_1d: transforms = transforms.Compose(
             [
