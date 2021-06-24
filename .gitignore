@@ -18,11 +18,18 @@ results/*
 weights/*
 
 # Keep the folders directories
-!dataset/.gitkeep 
+!datasets/.gitkeep
 !outputs/.gitkeep 
 !results/.gitkeep 
 !weights/.gitkeep 
 
 # Keep the example datasets
-!datasets/l2r/EXAMPLE_DATASET
-!datasets/s2d/EXAMPLE_DATASET
+!datasets/l2r/EXAMPLE_DATASET/.gitkeep
+!datasets/s2d/EXAMPLE_DATASET/.gitkeep
+
+# Keep the example datasets
+!datasets/l2r/EXAMPLE_DATASET/.gitkeep
+!datasets/s2d/EXAMPLE_DATASET/.gitkeep
+
+# Keep .gitkeep folders
+!**/*.gitkeep 
