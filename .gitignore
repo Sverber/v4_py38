@@ -2,9 +2,9 @@
 **/__pycache__
 **/.vscode  
 
-# Ignore all images to avoid uploading images accidently | Keep .jpg like this: !/results/*.jpg
-**/*.jpg
-**/*.png
+# # Ignore all images to avoid uploading images accidently | Keep .jpg like this: !/results/*.jpg
+# **/*.jpg
+# **/*.png
 
 # Allow images in root folder
 !/*.png  
@@ -22,3 +22,7 @@ weights/*
 !outputs/.gitkeep 
 !results/.gitkeep 
 !weights/.gitkeep 
+
+# Keep the example datasets
+!datasets/l2r/EXAMPLE_DATASET
+!datasets/s2d/EXAMPLE_DATASET

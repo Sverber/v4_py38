@@ -133,4 +133,3 @@ class StereoDisparityDataset(Dataset):
 
     def __len__(self):
         return max(len(self.stereo_l), len(self.disparity))
-

@@ -1,47 +1,24 @@
-# Self-supervised single image depth estimation using a cycle consistent generative adversarial network
+# Self-supervised depth estimation on synthesized stereo image-pairs using a cycle-consistent generative adversarial network
 
-*This file contains general notes and information that deem important for understanding and using this program.*
+*This file contains general notes and information that are important for understanding and using this program.*
+
+This deep learning project is for stereo image-pair synthesis and depth estimation on a given stereo image-pair. In this project, stereo image-pair synthesis is called left-to-right, i.e **L2R** and depth estimation is called stereo-to-depth, i.e. **S2D**. Hence, there are two sub-folders in the dataset folder and these contain one example dataset for L2R synthesis and S2D estimation. Within each sub-folder there's a train and a test folder. For each train or test dataset there are two domains, A and B. Both L2R and S2D networks learn to map images from domain A to domain B, and vice versa. For L2R synthesis it is recommended to use paired data, but not required. For S2D estimation it is not required, because the network is able to deal with un-paired data quite well.
 
 ## Environment
 
 * Anaconda virtual environment 
-* Python 3.8.5 64-bit
+* Python 3.7 
 
 ## Python packages
 
-* ***Package list coming soon..***
-* *Add package..*
-* *Add package..*
+*Assuming a fresh Anaconda environment.*
 
-## Datasets
-
-* ### **horse2zebra_000_999**       
-    * Contains **1000** training images per class.
-    * Contains **120** test images per class.
-    * Original image dimensions are **256 pixels** in width by **256 pixels** in height using **3 channels**.
-    * Resize to 61%: (156, 156) pixels.
-
-* ### **kitti_synthesized_000_999** 
-    * Contains **1000** training images per class.
-    * Contains **0** test images per class.
-    * Original image dimensions are **1216 pixels** in width by **352 pixels** in height using **3 channels**.
-    * Resize to 10%: (122, 35) pixels.
-
-* ### **DrivingStereo_demo_images** 
-    * Contains **300** training pairs of stereo images with the corresponding disparity map.
-    * Contains **0** test pairs of stereo images with the corresponding disparity map.
-    * Original image dimensions are **1762 pixels** in width by **800 pixels** in height using **3 channels**.
-    * Resize to 10%: (176, 79) pixels.
-
-* ### **Test_Set**
-    * Contains **600** training pairs of stereo images and their corresponding disparity map.
-    * Contains **76** test pairs of stereo images and their corresponding disparity map.
-    * Original image dimensions are **2208 pixels** in width by **1242 pixels** in height using **3 channels**.
-    * Resize to xx%: (68, 120) pixels.
-
-* ### **UASOL**
-    * ***Under construction***
-    * Contains **0** training pairs of stereo images and their corresponding disparity map.
-    * Contains **0** test pairs of stereo images and their corresponding disparity map.
-    * Original image dimensions are **2208 pixels** in width by **1242 pixels** in height using **3 channels**.
-    * Resize to 5.43%: (68, 120) pixels. *(divide by 15 and multiply with 0.82)*
+* PyTorch
+* PyTorch_fid
+* Torchvision
+* Matplotlib
+* Numpy
+* Scipy
+* Yaml
+* Tqdm
+* Labml-helpers
