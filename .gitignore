@@ -24,8 +24,8 @@ weights/*
 !weights/.gitkeep 
 
 # Keep the example datasets
-!datasets/l2r/EXAMPLE_DATASET/.gitkeep
-!datasets/s2d/EXAMPLE_DATASET/.gitkeep
+!datasets/l2r/.gitkeep
+!datasets/s2d/.gitkeep
 
 # Keep the example datasets
 !datasets/l2r/EXAMPLE_DATASET/.gitkeep
