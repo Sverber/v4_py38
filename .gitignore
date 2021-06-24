@@ -30,6 +30,3 @@ weights/*
 # Keep the example datasets
 !datasets/l2r/EXAMPLE_DATASET/.gitkeep
 !datasets/s2d/EXAMPLE_DATASET/.gitkeep
-
-# Keep .gitkeep folders
-!**/*.gitkeep 
