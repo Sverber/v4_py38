@@ -369,8 +369,8 @@ def test(
         paths_A2B = [f"{DIR_RESULTS}/{RUN_PATH}/FID/A2B/fake", f"{DIR_RESULTS}/{RUN_PATH}/FID/A2B/real"]
 
         # Calculate the FID scores
-        fid_score_A = calculate_fid_given_paths(paths=paths_B2A, batch_size=32, device=run.device)
-        fid_score_B = calculate_fid_given_paths(paths=paths_A2B, batch_size=32, device=run.device)
+        fid_score_A = calculate_fid_given_paths(paths=paths_B2A, batch_size=run.batch_size, device=run.device)
+        fid_score_B = calculate_fid_given_paths(paths=paths_A2B, batch_size=run.batch_size, device=run.device)
 
         """ Print evaluation """
 
@@ -426,7 +426,7 @@ if __name__ == "__main__":
         mydataloader = MyDataLoader()
 
         CHANNELS = 3
-        GROUP = "s2d"
+        GROUP = "l2r"
 
         test(
             # Parameters, dataset to use and channels
@@ -439,20 +439,41 @@ if __name__ == "__main__":
             # Model configuration, i.e. directory
             model_group=GROUP,
             model_folder="Test_Set_RGB_DISPARITY",
-            model_date=f"2021-06-11",
-            model_name=f"17.37.36___EP20_DE10_LRG0.0002_CH3",
+            model_date=f"2021-06-22",
+            model_name=f"17.51.25___EP100_DE050_LRG0.0002_CH3",
             # Generator model names
             model_netG_A2B=f"net_G_A2B.pth",
             model_netG_B2A=f"net_G_B2A.pth",
         )
 
+        """
+        
+        # Datset: s2d \ DIML \ test_disparity 
+        # Model: s2d \ Test_Set_RGB_DISPARITY  
+     
+        test(
+            # Parameters, dataset to use and channels
+            parameters=PARAMETERS,
+            dataset=mydataloader.get_dataset(GROUP, "DIML", "test_disparity", (68, 120), CHANNELS, False),
+            channels=CHANNELS,
+            # Dataset- group and name
+            dataset_group=GROUP,
+            dataset_name=f"Test_Set_RGB_DISPARITY",
+            # Model configuration, i.e. directory
+            model_group=GROUP,
+            model_folder="Test_Set_RGB_DISPARITY",
+            model_date=f"2021-06-21",
+            model_name=f"20.27.41___EP100_DE050_LRG0.0002_CH3",
+            # Generator model names
+            model_netG_A2B=f"net_G_A2B.pth",
+            model_netG_B2A=f"net_G_B2A.pth",
+        )
+
+        """
+
     except KeyboardInterrupt:
+
         try:
             sys.exit(0)
         except SystemExit:
             os._exit(0)
-
-
-# https://github.com/mseitzer/pytorch-fid
-
-# python -m pytorch_fid path/to/dataset1 path/to/dataset2

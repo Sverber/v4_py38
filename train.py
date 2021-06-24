@@ -8,7 +8,6 @@ import csv
 import sys
 import yaml
 import random
-import pprint
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -46,9 +45,6 @@ from scipy.linalg import sqrtm
 
 # Clear the terminal
 os.system("cls")
-
-# Pretty printer
-pp = pprint.PrettyPrinter(indent=4)
 
 
 class GradientPenalty(Module):
@@ -162,7 +158,7 @@ class RunTrainManager:
             # Create a per-epoch csv log file
             self.__create_per_epoch_csv_logs()
 
-            # Create Generator and Discriminator models # in_channels; # out_channels; use_LeReLU; use_KNN
+            # Create Generator and Discriminator models # in_channels; # out_channels
             self.net_G_A2B = Generator(in_channels=self.channels, out_channels=self.channels).to(run.device)
             self.net_G_B2A = Generator(in_channels=self.channels, out_channels=self.channels).to(run.device)
             self.net_D_A = Discriminator(in_channels=self.channels, out_channels=self.channels).to(run.device)
@@ -226,8 +222,11 @@ class RunTrainManager:
             self.avg_rmse_loss_generated_B_array = []
 
             # # Keep track of the per-epoch average MSE loss
-            # self.avg_fid_score_generated_A_array = []
-            # self.avg_fid_score_generated_B_array = []
+            self.avg_fid_score_generated_A_array = []
+            self.avg_fid_score_generated_B_array = []
+
+            # Keep track of the FID score
+            self.fid_score_A, self.fid_score_B = 0, 0
 
             # Keep track of the per-epoch noise factor
             self.noise_factor_array = []
@@ -305,7 +304,7 @@ class RunTrainManager:
 
                 """ Call the end-of-epoch functions """
 
-                # Update FID Score on the generated images this epoch
+                # Update FID Score on the generated images for current epoch, once every 5 epochs
                 self.__update_fid_score(run, i)
 
                 # Update learning rates after each epoch
@@ -443,6 +442,8 @@ class RunTrainManager:
                 [
                     "Epoch",
                     "Noise factor",
+                    "FID Score A",
+                    "FID Score B",
                     "Average MSE loss A",
                     "Average MSE loss B",
                     "Average RMSE loss A",
@@ -479,7 +480,9 @@ class RunTrainManager:
 
         """ Smoothen one-hot encoced labels y_ls = (1 - α) * y_hot + α / K """
 
-        smooth_label = (1 - smoothing) * true_label + smoothing / classes
+        random_noise = random.uniform(1, 2)
+
+        smooth_label = (1 - smoothing) * true_label + (smoothing * random_noise) / classes
 
         return smooth_label
 
@@ -605,7 +608,7 @@ class RunTrainManager:
 
         lambda_A2B = 10  # 10 by default
         lambda_B2A = 10  # 10 by default
-        lambda_id = 0.0  # 0.5 by default, set to 0.0 for s2d because colour preservation is not desired
+        lambda_id = 0.5  # 0.5 by default, set to 0.0 for s2d because colour preservation is not desired
 
         # Identity loss should not be used for s2d datasets (colour shouldn't be preseved in the result)
         if self.dataset_group == "s2d":
@@ -641,16 +644,6 @@ class RunTrainManager:
 
         self.gradient_penalty_A = gradient_penalty(self.generated_image_B2A, self.generated_output_A)
         self.gradient_penalty_B = gradient_penalty(self.generated_image_A2B, self.generated_output_B)
-
-        """
-        # Thought experiment:
-        # Given the outputs: A = 0.25; B = 0.15; C = 0.05
-
-        # A: 0.25 * 10 * 0.40 = 1.000
-        # B: 0.15 * 10 * 0.30 = 0.750
-        # C: 0.05 * 10 * 0.25 = 0.125 --> loss, ergo the difference is low, thus..
-
-        """
 
         # Cycle loss: A -> B -> A
         self.recovered_image_A = self.net_G_B2A(self.generated_image_A2B)
@@ -848,81 +841,22 @@ class RunTrainManager:
 
         """ Calculate the FID Score """
 
-        print(self.get_run_path)
+        if i % 1 == 0:
 
-        paths_B2A = [
-            r"\results\s2d\Test_Set_RGB_DISPARITY\2021-06-17\05.15.21___EP20_DE10_LRG0.0002_CH3\FID\B2A\fake",
-            r"\results\s2d\Test_Set_RGB_DISPARITY\2021-06-17\05.15.21___EP20_DE10_LRG0.0002_CH3\FID\B2A\real",
-        ]
+            paths_B2A = [
+                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features/B2A/fake",
+                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features/B2A/real",
+            ]
 
-        paths_A2B = [
-            r"\results\s2d\Test_Set_RGB_DISPARITY\2021-06-17\05.15.21___EP20_DE10_LRG0.0002_CH3\FID\A2B\fake",
-            r"\results\s2d\Test_Set_RGB_DISPARITY\2021-06-17\05.15.21___EP20_DE10_LRG0.0002_CH3\FID\A2B\real",
-        ]
+            paths_A2B = [
+                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features/A2B/fake",
+                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features/A2B/real",
+            ]
 
-        self.fid_score_A = calculate_fid_given_paths(paths=paths_B2A, batch_size=run.batch_size, device=run.device)
-        self.fid_score_B = calculate_fid_given_paths(paths=paths_A2B, batch_size=run.batch_size, device=run.device)
+            self.fid_score_A = calculate_fid_given_paths(paths=paths_B2A, batch_size=run.batch_size, device=run.device)
+            self.fid_score_B = calculate_fid_given_paths(paths=paths_A2B, batch_size=run.batch_size, device=run.device)
 
-        # # Calculate the cumulative FID scores
-        # self.cum_fid_score_generated_A += self.fid_score_A
-        # self.cum_fid_score_generated_B += self.fid_score_B
-
-        # # Calculate the average FID scores
-        # self.avg_fid_score_generated_A = self.cum_fid_score_generated_A / (i + 1)
-        # self.avg_fid_score_generated_B = self.cum_fid_score_generated_B / (i + 1)
-
-        return None
-
-        # """ Calculate a per-batch, cumulative and average FID Score of the generated outputs of generators A2B and B2A """
-
-        # # RGB images are become 3D arrays after sqeeuzing (3, h, w) and therefore need to be reshapen into a 2D array
-
-        # """ Reshape into 2D array """
-
-        # # The following 1C reshapes it into [1, h, w] and is therefore automatically converted in 2D array
-        # act1_A = self.generated_image_B2A.detach().squeeze().cpu().numpy()
-        # act2_A = self.real_image_A.detach().squeeze().cpu().numpy()
-
-        # act1_B = self.generated_image_A2B.detach().squeeze().cpu().numpy()
-        # act2_B = self.real_image_B.detach().squeeze().cpu().numpy()
-
-        # # Reshape source- and target image A to a 2D array if not 1C data
-        # if self.channels != 1:
-
-        #     act1_A = act1_A.reshape(
-        #         self.generated_image_B2A[0],
-        #         self.generated_image_B2A[1] * self.generated_image_B2A[2] * self.generated_image_B2A[3],
-        #     )
-        #     act2_A = act2_A.reshape(
-        #         self.real_image_A[0], self.real_image_A[1] * self.real_image_A[2] * self.real_image_A[3],
-        #     )
-        #     act1_B = act1_B.reshape(
-        #         self.generated_image_A2B[0],
-        #         self.generated_image_A2B[1] * self.generated_image_A2B[2] * self.generated_image_A2B[3],
-        #     )
-        #     act2_B = self.real_image_A.reshape(
-        #         self.real_image_B[0], self.real_image_B[1] * self.real_image_B[2] * self.real_image_B[3],
-        #     )
-
-        # # Calculate the FID scores and convert tensors to usable 2D numpy arrays
-        # fid_score_A = self.calculate_fid(
-        #     self.generated_image_B2A.detach().squeeze().cpu().numpy(),
-        #     self.real_image_A.detach().squeeze().cpu().numpy(),
-        # )
-        # fid_score_B = self.calculate_fid(
-        #     self.generated_image_A2B.detach().squeeze().cpu().numpy(),
-        #     self.real_image_B.detach().squeeze().cpu().numpy(),
-        # )
-
-        # # Calculate the cumulative FID scores
-        # self.cum_fid_score_generated_A += fid_score_A
-        # self.cum_fid_score_generated_B += fid_score_B
-
-        # # Calculate the average FID scores
-        # self.avg_fid_score_generated_A = self.cum_fid_score_generated_A / (i + 1)
-        # self.avg_fid_score_generated_B = self.cum_fid_score_generated_B / (i + 1)
-
-        # pass
+        pass
 
     def __update_learning_rate(self) -> None:
 
@@ -949,7 +883,7 @@ class RunTrainManager:
                 #
                 f"D_A, D_B: {self.avg_error_D_A:.3f} ; {self.avg_error_D_B:.3f} || "
                 f"G_A2B, G_B2A: {self.avg_error_G_A2B_adv_loss:.3f} ; {self.avg_error_G_B2A_adv_loss:.3f} || "
-                f"FID_A, FID_B: {self.fid_score_A:.3f} ; {self.fid_score_A:.3f} ||"
+                f"FID_A, FID_B: {self.fid_score_A:.3f} ; {self.fid_score_B:.3f} ||"
                 #
             )
 
@@ -971,10 +905,10 @@ class RunTrainManager:
         """ Save per-epoch all the generated images for the FID score calculation """
 
         # Write images real-time to feature vector directory
-        filepath_fake_A = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features/B2A/{i + 1:04d}___fake_A.png"
-        filepath_real_A = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features/B2A/{i + 1:04d}___real_A.png"
-        filepath_fake_B = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features/A2B/{i + 1:04d}___fake_B.png"
-        filepath_real_B = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features/A2B/{i + 1:04d}___real_B.png"
+        filepath_fake_A = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features/B2A/fake/{i + 1:04d}___fake_A.png"
+        filepath_real_A = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features/B2A/real/{i + 1:04d}___real_A.png"
+        filepath_fake_B = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features/A2B/fake/{i + 1:04d}___fake_B.png"
+        filepath_real_B = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features/A2B/real/{i + 1:04d}___real_B.png"
 
         # Save all the generated (fake) image s
         vutils.save_image(self.generated_image_B2A.detach(), filepath_fake_A, normalize=True)
@@ -1181,6 +1115,8 @@ class RunTrainManager:
                 [
                     epoch,
                     f"{self.noise_factor:.3f}",
+                    f"{self.fid_score_A:.3f}",
+                    f"{self.fid_score_B:.3f}",
                     f"{self.avg_mse_loss_generated_A:.3f}",
                     f"{self.avg_mse_loss_generated_B:.3f}",
                     f"{self.avg_rmse_loss_generated_A:.3f}",
@@ -1264,10 +1200,10 @@ class RunTrainManager:
             self.per_batch_axes[3].plot(self.batch_losses_D_A, label="D_A", color="tab:orange")
 
             # Add legends
-            self.per_batch_axes[0].legend(loc="upper right", frameon=True).get_frame()
-            self.per_batch_axes[1].legend(loc="upper right", frameon=True).get_frame()
-            self.per_batch_axes[2].legend(loc="upper right", frameon=True).get_frame()
-            self.per_batch_axes[3].legend(loc="upper right", frameon=True).get_frame()
+            self.per_batch_axes[0].legend(loc="lower left", frameon=True).get_frame()
+            self.per_batch_axes[1].legend(loc="lower left", frameon=True).get_frame()
+            self.per_batch_axes[2].legend(loc="lower left", frameon=True).get_frame()
+            self.per_batch_axes[3].legend(loc="lower left", frameon=True).get_frame()
 
             # Adjust layout and save
             self.per_batch_figure.tight_layout(h_pad=2.0, w_pad=0.0)
@@ -1317,24 +1253,20 @@ class RunTrainManager:
 
         # self.per_batch_axes[0].set_title(f"Total loss of generator A2B & B2A (epoch {epoch})")
         # Set titles
-        self.per_epoch_axes[0].set_title(
-            f"The total losses and adversarial losses of Generators A2B & B2A (during training)"
-        )
-        self.per_epoch_axes[1].set_title(
-            f"The total losses (adversarial) losses of Discriminators A & B (during training)"
-        )
+        self.per_epoch_axes[0].set_title(f"The total loss (adv. + cc.) of Generators A2B & B2A (during training)")
+        self.per_epoch_axes[1].set_title(f"The total loss (adv.) of Discriminators A & B (during training)")
         self.per_epoch_axes[2].set_title(f"Decaying noise factor (during training)")
-        self.per_epoch_axes[3].set_title(f"Average MSE losses of the generated images (during training)")
-        self.per_epoch_axes[4].set_title(f"Average RMSE losses of the generated images (during training)")
-        self.per_epoch_axes[5].set_title(f"Average FID score of the generated images (during training)")
+        self.per_epoch_axes[3].set_title(f"Average MSE losses per-epoch of the generated images (during training)")
+        self.per_epoch_axes[4].set_title(f"Average RMSE losses per-epoch of the generated images (during training)")
+        self.per_epoch_axes[5].set_title(f"Per-epoch FID score of the generated images (during training)")
 
         # Set labels
         self.per_epoch_axes[0].set(xlabel="Epoch", ylabel="G loss")
         self.per_epoch_axes[1].set(xlabel="Epoch", ylabel="D loss")
         self.per_epoch_axes[2].set(xlabel="Epoch", ylabel="Noise factor")
         self.per_epoch_axes[3].set(xlabel="Epoch", ylabel="MSE")
-        self.per_epoch_axes[3].set(xlabel="Epoch", ylabel="RMSE")
-        self.per_epoch_axes[3].set(xlabel="Epoch", ylabel="FID")
+        self.per_epoch_axes[4].set(xlabel="Epoch", ylabel="RMSE")
+        self.per_epoch_axes[5].set(xlabel="Epoch", ylabel="FID")
 
         # Add gridlines
         self.per_epoch_axes[0].grid()
@@ -1351,8 +1283,8 @@ class RunTrainManager:
         self.per_epoch_axes[0].plot(self.losses_D_B, label="Adv. loss D_B", color="tab:orange")
 
         # Plot discriminator values
-        self.per_epoch_axes[1].plot(self.losses_G_B2A_adv, label="Adv. loss G_B2A", color="tab:orange")
-        self.per_epoch_axes[1].plot(self.losses_D_A, label="Adv. loss D_A", color="tab:blue")
+        self.per_epoch_axes[1].plot(self.losses_G_B2A_adv, label="Adv. loss G_B2A", color="tab:blue")
+        self.per_epoch_axes[1].plot(self.losses_D_A, label="Adv. loss D_A", color="tab:orange")
 
         # Plot noise factor values
         self.per_epoch_axes[2].plot(self.noise_factor_array, label="Noise factor", color="tab:gray")
@@ -1370,12 +1302,12 @@ class RunTrainManager:
         self.per_epoch_axes[5].plot(self.avg_fid_score_generated_B_array, label="FID score A2B", color="red")
 
         # Add legends
-        self.per_epoch_axes[0].legend(loc="upper right", frameon=True).get_frame()
-        self.per_epoch_axes[1].legend(loc="upper right", frameon=True).get_frame()
-        self.per_epoch_axes[2].legend(loc="upper right", frameon=True).get_frame()
-        self.per_epoch_axes[3].legend(loc="upper right", frameon=True).get_frame()
-        self.per_epoch_axes[4].legend(loc="upper right", frameon=True).get_frame()
-        self.per_epoch_axes[5].legend(loc="upper right", frameon=True).get_frame()
+        self.per_epoch_axes[0].legend(loc="lower left", frameon=True).get_frame()
+        self.per_epoch_axes[1].legend(loc="lower left", frameon=True).get_frame()
+        self.per_epoch_axes[2].legend(loc="lower left", frameon=True).get_frame()
+        self.per_epoch_axes[3].legend(loc="lower left", frameon=True).get_frame()
+        self.per_epoch_axes[4].legend(loc="lower left", frameon=True).get_frame()
+        self.per_epoch_axes[5].legend(loc="lower left", frameon=True).get_frame()
 
         # Adjust layout and save
         self.per_epoch_figure.tight_layout(h_pad=2.0, w_pad=0.0)
@@ -1432,8 +1364,10 @@ class RunTrainManager:
 
         if dir == "outputs":
             try:
-                os.makedirs(os.path.join(path, "realtime", "features", "B2A"))
-                os.makedirs(os.path.join(path, "realtime", "features", "A2B"))
+                os.makedirs(os.path.join(path, "realtime", "features", "B2A", "fake"))
+                os.makedirs(os.path.join(path, "realtime", "features", "B2A", "real"))
+                os.makedirs(os.path.join(path, "realtime", "features", "A2B", "fake"))
+                os.makedirs(os.path.join(path, "realtime", "features", "A2B", "real"))
                 os.makedirs(os.path.join(path, "logs"))
                 os.makedirs(os.path.join(path, "plots"))
                 os.makedirs(os.path.join(path, "A"))
@@ -1490,17 +1424,11 @@ PARAMETERS: OrderedDict = OrderedDict(
     # Data dimensions
     batch_size=[1],
     channels=[1],
-    image_h=[68],
-    image_w=[120],
     # Model learning
     learning_rate_dis=[0.0002],
     learning_rate_gen=[0.0002],
-    num_epochs=[20],
-    decay_epochs=[10],
-    # Model architectural variations
-    use_DROPOUT=[True],
-    use_LeReLU=[True],
-    use_KNN=[True],
+    num_epochs=[100],
+    decay_epochs=[50],
 )
 
 
@@ -1517,15 +1445,20 @@ if __name__ == "__main__":
         channels = 3
         group = "s2d"
 
-        dataset = mydataloader.get_dataset(group, "Test_Set_RGB_DISPARITY", "train", (68, 120), channels, False)
+        dataset = mydataloader.get_dataset(group, "Test_Set_RGB_DISPARITY", "train", (100, 180), channels, False)
         manager = RunTrainManager(dataset, channels, PARAMETERS)
         manager.start_cycle()
 
         """
 
-        # Test_Set,     originally (1242, 2208),    train at (68, 120)
-        # DIODE,        originally (1024, 768),     train at (40, 54)
-        # DIML,         originally (384, 640),      train at (64, 106)
+        # Test_Set_RGB_DISPARITY,       originally (1242, 2208),    train at (68, 120) # (100, 180)
+        # DIODE,                        originally (768, 1024),     train at (40, 54)
+        # DIML,                         originally (384, 640),      train at (64, 106)
+
+        # Test_Set_RGB_DISPARITY
+        dataset = mydataloader.get_dataset(group, "Test_Set_RGB_DISPARITY", "train", (68, 120), channels, False)
+        manager = RunTrainManager(dataset, channels, PARAMETERS)
+        manager.start_cycle()
 
         # DIML DATASET
         # dataset = mydataloader.get_dataset("s2d", "DIML", "test_disparity", (64, 106), channels, False)
@@ -1539,3 +1472,4 @@ if __name__ == "__main__":
             sys.exit(0)
         except SystemExit:
             os._exit(0)
+
