@@ -46,6 +46,10 @@ from numpy import iscomplexobj
 from scipy.linalg import sqrtm
 
 
+# Clear the terminal
+os.system("cls")
+
+
 class GradientPenalty(Module):
     def __call__(self, x: torch.Tensor, f: torch.Tensor):
 
@@ -212,7 +216,6 @@ class RunTrainManager:
                     pass
 
                 """ Call the end-of-epoch functions """
-
 
                 # Update FID Score on the generated images for current epoch, once every 5 epochs
                 self.__update_fid_score(run, i, 1)
@@ -689,7 +692,6 @@ class RunTrainManager:
 
             self.reference_image_A = copy.deepcopy(self.real_image_A)
             self.reference_image_B = copy.deepcopy(self.real_image_B)
-
 
         # Real data label is 1, fake data label is 0.
         self.real_label = torch.full((run.batch_size, self.channels), 1, device=run.device, dtype=torch.float32)
