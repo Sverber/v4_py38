@@ -6,6 +6,7 @@ from __future__ import absolute_import, division, print_function
 import os
 import csv
 import sys
+import copy
 import time
 import yaml
 import random
@@ -85,26 +86,28 @@ class RunTrainManager:
     def __init__(
         self,
         dataset,
-        channels: int,
         parameters: OrderedDict,
+        models_directory: str,
+        use_pretrained_weights: bool,
         dir_dataset: str = "./dataset",
         dir_outputs: str = "./outputs",
         dir_results: str = "./results",
         dir_weights: str = "./weights",
         save_epoch_freq: int = 1,
-        show_image_freq: int = 5,
-        show_graph_freq: int = 10,
+        show_image_freq: int = 10,
+        show_graph_freq: int = 20,
         validation_percentage: float = 0.0,
     ) -> None:
-
-        # Clear the terminal
-        os.system("cls")
 
         """ [ Insert documentation ] """
 
         # Arguments: parameters
         self.parameters = parameters
-        self.channels = channels
+        self.channels = parameters["channels"][0]
+
+        # Arguments: usage of pre-trained weights
+        self.use_pretrained_weights = use_pretrained_weights
+        self.models_directory = models_directory
 
         # Arguments: dataset
         self.dataset = dataset
@@ -133,26 +136,16 @@ class RunTrainManager:
         self.validation_batch_index = None
         self.batch_is_validation = False
         self.freq_update_discriminator = 2
-
-        # Runs
-        self.runs = self.__build_cycle(parameters)
-
-        # Define pre-trained models state
-        self.use_pretrained_models = False
-
-        # Starting epoch
         self.start_epoch = 0
+
+        # Build cycle runs for pre-trained weights, if any
+        self.runs = self.__init_cycle(parameters, use_pretrained_weights)
 
         pass
 
     """ [ Public ] Starts the training loop """
 
-    def start_cycle(self, use_pretrained_models: bool = False, folder_models: str = None) -> None:
-
-        """ Training cyclus """
-
-        # Handles the arguments of the start function
-        self.__handle_starting_arguments(use_pretrained_models, folder_models)
+    def start_cycle(self) -> None:
 
         """ Start training  """
 
@@ -187,10 +180,10 @@ class RunTrainManager:
                     self.batch_is_validation = True if i > self.validation_batch_index else False
 
                     # Read data
-                    self.__read_data(run, data)
+                    self.__read_data(i, epoch, run, data)
 
                     # Make reference image
-                    self.__set_reference_data(i, data)
+                    self.__set_reference_data(i, epoch)
 
                     # Update generator networks
                     self.__update_generators(i)
@@ -216,62 +209,71 @@ class RunTrainManager:
                     # Print a progress bar in the terminal
                     self.__print_progress(run, i, epoch)
 
+                    pass
+
                 """ Call the end-of-epoch functions """
 
+
                 # Update FID Score on the generated images for current epoch, once every 5 epochs
-                self.__update_fid_score(run, i)
+                self.__update_fid_score(run, i, 1)
 
                 # Update learning rates after each epoch
                 self.__update_learning_rate()
 
-                # Save a snapshot of the generated output using the reference images
-                self.__save_per_epoch_snapshot(epoch)
-
-                # Save some logs at the end of each epoch
-                self.__save_end_epoch_logs(epoch, run)
-
-                # Save the losses in a plot of each epoch
-                self.__save_plot_per_epoch()
-
-                # # Save the output at the end of each epoch
-                # self.__save_end_epoch_output(epoch) # deprecated
-
-                """ Save latest model """
-
-                # Save model weights
+                # Save latest model weights
                 self.__save_weights(epoch, False)
 
-                # Save meta data
+                # Save latests meta data
                 self.__save_meta_data(run, epoch)
+
+                # Save a snapshot of the generated output using the reference images
+                self.__save_reference_snapshot(run, epoch)
+
+                # Save some .csv logs at the end of each epoch
+                self.__save_end_epoch_logs(run, epoch)
+
+                # Save some .png plots
+                self.__save_plot_per_epoch()
+
+                pass
 
             """ Save final model """
 
             # Save final model weights
             self.__save_weights(epoch, True)
 
+            # Save final meta data
+            self.__save_meta_data(run, epoch)
+
+            pass
+
         pass
 
     """" [ Private ] Build the training cycle according the parameters """
 
-    def __build_cycle(self, parameters) -> list:
+    def __init_cycle(self, parameters, use_pretrained_weights: bool) -> None:
 
-        """ Create a list of runs using all configured parameter combinations """
+        self.runs = self.__build_cycle(parameters)
 
-        run = namedtuple("Run", parameters.keys())
+        # If no pre-trained weights are used, build cycl
+        if use_pretrained_weights == True:
 
-        self.runs = []
+            # Load pickled parameters
+            self.parameters = self.load_pickle(os.path.join(self.models_directory, "parameters.pickle"))
 
-        for v in product(*parameters.values()):
-            self.runs.append(run(*v))
+            # Load metadata and runs
+            self.metadata = self.load_pickle(os.path.join(self.models_directory, "metadata.pickle"))
+
+        else:
+
+            # Define runs
+            self.runs = self.__build_cycle(self.parameters)
 
         return self.runs
 
     def __init_networks(self, run) -> None:
 
         """ Initialize the networks and other components/variables """
-
-        # Clear the terminal
-        os.system("cls")
 
         # Clear occupied CUDA memory
         torch.cuda.empty_cache()
@@ -286,20 +288,38 @@ class RunTrainManager:
         # Make required directories for storing the training output
         self.makedirs(path=os.path.join(self.DIR_OUTPUTS, self.RUN_PATH), dir="outputs")
 
+        # Make required directories for storing the model weights
+        self.makedirs(path=os.path.join(self.DIR_WEIGHTS, self.RUN_PATH), dir="weights")
+
         # Create a per-epoch csv log file
         self.__create_per_epoch_csv_logs()
 
         """ Create network models, use pre-trained weight or new weights """
 
-        # Load the un-trained weights into our models
-        if self.use_pretrained_models == False:
+        if self.use_pretrained_weights == False:
+
+            # Load the un-trained weights into our models
             self.__load_weights_untrained(run)
 
-        # Load the pre-trained model weights into our models
         else:
-            self.__load_weights_pretrained(False, self.folder_models)
+
+            # Load the pre-trained model weights into our models
+            self.__load_weights_pretrained(False, self.models_directory)
 
         pass
+
+    def __build_cycle(self, parameters) -> list:
+
+        """ Create a list of runs using all configured parameter combinations """
+
+        run = namedtuple("Run", parameters.keys())
+
+        self.runs = []
+
+        for v in product(*parameters.values()):
+            self.runs.append(run(*v))
+
+        return self.runs
 
     """ [ Private ] Functions to load the networks and define other components- and variables """
 
@@ -341,36 +361,41 @@ class RunTrainManager:
 
         pass
 
-    def __load_weights_pretrained(self, final_model: bool, folder_models: str) -> None:
+    def __load_weights_pretrained(self, final_model: bool, models_directory: str) -> None:
 
-        # Load pickled metadata
-        pickled_metadata = self.load_pickle(os.path.join(folder_models, "metadata.pickle"))
+        # Read meta data
+        self.metadata = self.load_pickle(os.path.join(self.models_directory, "metadata.pickle"))
+
+        # Set starting epoch
+        self.start_epoch = self.metadata["start_epoch"]
 
         # Redefine run
-        run = pickled_metadata["run"]
+        channels = int(self.metadata["channels"])
+
+        # Use current device
+        DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Decompose filepath into multipe paths for the latest models
+        filepath_G_B2A = os.path.join(models_directory, "latest", "net_G_B2A.pth")
+        filepath_G_A2B = os.path.join(models_directory, "latest", "net_G_A2B.pth")
+        filepath_D_A = os.path.join(models_directory, "latest", "net_D_A.pth")
+        filepath_D_B = os.path.join(models_directory, "latest", "net_D_B.pth")
 
-        filepath_G_B2A = os.path.join(folder_models, "latest", "net_G_B2A.pth")
-        filepath_G_A2B = os.path.join(folder_models, "latest", "net_G_A2B.pth")
-        filepath_D_A = os.path.join(folder_models, "latest", "net_D_A.pth")
-        filepath_D_B = os.path.join(folder_models, "latest", "net_D_B.pth")
+        # Create generator models
+        self.net_G_B2A = Generator(channels, channels).to(DEVICE)
+        self.net_G_A2B = Generator(channels, channels).to(DEVICE)
+
+        # Create discriminator models
+        self.net_D_A = Discriminator(channels, channels).to(DEVICE)
+        self.net_D_B = Discriminator(channels, channels).to(DEVICE)
 
         # Use final model weights instead if requested
         if final_model == True:
 
-            filepath_G_B2A = os.path.join(folder_models, "net_G_B2A", "net_G_B2A.pth")
-            filepath_G_A2B = os.path.join(folder_models, "net_G_A2B", "net_G_A2B.pth")
-            filepath_D_A = os.path.join(folder_models, "net_D_A", "net_D_A.pth")
-            filepath_D_B = os.path.join(folder_models, "net_D_B", "net_D_B.pth")
-
-        # Create generator models
-        self.net_G_B2A = Generator(channels, channels).to(run.device)
-        self.net_G_A2B = Generator(channels, channels).to(run.device)
-
-        # Create discriminator models
-        self.net_D_A = Discriminator(channels, channels).to(run.device)
-        self.net_D_B = Discriminator(channels, channels).to(run.device)
+            filepath_G_B2A = os.path.join(models_directory, "net_G_B2A", "net_G_B2A.pth")
+            filepath_G_A2B = os.path.join(models_directory, "net_G_A2B", "net_G_A2B.pth")
+            filepath_D_A = os.path.join(models_directory, "net_D_A", "net_D_A.pth")
+            filepath_D_B = os.path.join(models_directory, "net_D_B", "net_D_B.pth")
 
         # Load state dicts of onto Generators
         self.net_G_B2A.load_state_dict(torch.load(filepath_G_B2A))
@@ -387,29 +412,22 @@ class RunTrainManager:
         self.net_D_B.eval()
 
         # Define loss functions
-        self.cycle_loss = torch.nn.L1Loss().to(run.device)
-        self.identity_loss = torch.nn.L1Loss().to(run.device)
-        self.adversarial_loss = torch.nn.MSELoss().to(run.device)
+        self.cycle_loss = torch.nn.L1Loss().to(DEVICE)
+        self.identity_loss = torch.nn.L1Loss().to(DEVICE)
+        self.adversarial_loss = torch.nn.MSELoss().to(DEVICE)
 
         # Optimizers
-        self.optimizer_G_B2A = pickled_metadata["optimizer_G_B2A"]
-        self.optimizer_G_A2B = pickled_metadata["optimizer_G_A2B"]
-        self.optimizer_D_A = pickled_metadata["optimizer_D_A"]
-        self.optimizer_D_B = pickled_metadata["optimizer_D_B"]
+        self.optimizer_G_B2A = self.metadata["optimizer_G_B2A"]
+        self.optimizer_G_A2B = self.metadata["optimizer_G_A2B"]
+        self.optimizer_D_A = self.metadata["optimizer_D_A"]
+        self.optimizer_D_B = self.metadata["optimizer_D_B"]
 
         # Learning rates
-        self.lr_lambda = pickled_metadata["lr_lambda"]
-        self.lr_lambda = DecayLR(run.num_epochs, self.start_epoch, run.decay_epochs).step
-        self.lr_scheduler_G_A2B = pickled_metadata["lr_scheduler_G_A2B"]
-        self.lr_scheduler_G_B2A = pickled_metadata["lr_scheduler_G_B2A"]
-        self.lr_scheduler_D_A = pickled_metadata["lr_scheduler_D_A"]
-        self.lr_scheduler_D_B = pickled_metadata["lr_scheduler_D_B"]
-
-        # Set starting epoch
-        self.start_epoch = pickled_metadata.start_epoch
-
-        # Sleep
-        time.sleep(3)
+        self.lr_lambda = self.metadata["lr_lambda"]
+        self.lr_scheduler_G_A2B = self.metadata["lr_scheduler_G_A2B"]
+        self.lr_scheduler_G_B2A = self.metadata["lr_scheduler_G_B2A"]
+        self.lr_scheduler_D_A = self.metadata["lr_scheduler_D_A"]
+        self.lr_scheduler_D_B = self.metadata["lr_scheduler_D_B"]
 
         pass
 
@@ -444,8 +462,9 @@ class RunTrainManager:
         self.avg_fid_score_generated_A_array = []
         self.avg_fid_score_generated_B_array = []
 
-        # Keep track of the FID score
+        # Keep track of the FID scores
         self.fid_score_A, self.fid_score_B = 0, 0
+        self.fid_score_reference_A, self.fid_score_reference_B = 0, 0
 
         # Keep track of the per-epoch noise factor
         self.noise_factor_array = []
@@ -485,23 +504,6 @@ class RunTrainManager:
 
         # Set error variables at 0 at the begin of each epoch
         self.__set_error_variables_to_zero()
-
-        pass
-
-    def __handle_starting_arguments(self, use_pretrained_models: bool, folder_models: str) -> None:
-
-        # Define variables
-        self.folder_models = folder_models
-        self.use_pretrained_models = use_pretrained_models
-
-        # Load parameters and redefine runs
-        if self.use_pretrained_models == True:
-
-            # Load pickled parameters
-            self.parameters = self.load_pickle(os.path.join(self.folder_models, "parameters.pickle"))
-
-            # Runs
-            self.runs = self.__build_cycle(self.parameters)
 
         pass
 
@@ -583,10 +585,6 @@ class RunTrainManager:
                     "loss_cycle_BAB",
                     "loss_identity_A2B",
                     "loss_identity_B2A",
-                    "v_error_D_A",
-                    "v_error_D_B",
-                    "v_error_G_A",
-                    "v_error_G_B",
                 ]
             )
 
@@ -605,6 +603,10 @@ class RunTrainManager:
                     "Noise factor",
                     "FID Score A",
                     "FID Score B",
+                    "Ref. FID Score A",
+                    "Ref. FID Score B",
+                    "Ref. RMSE Score A",
+                    "Ref. RMSE Score B",
                     "Average MSE loss A",
                     "Average MSE loss B",
                     "Average RMSE loss A",
@@ -649,7 +651,7 @@ class RunTrainManager:
 
         return smooth_label
 
-    def __read_data(self, run, data) -> None:
+    def __read_data(self, i, epoch, run, data) -> None:
 
         """ Read a left-to-right dataset or a stereo-to-disparity dataset """
 
@@ -683,6 +685,12 @@ class RunTrainManager:
         else:
             raise Exception(f"Can not read input images, given group '{self.dataset_group}' is incorrect.")
 
+        if epoch == 0 and i == 0:
+
+            self.reference_image_A = copy.deepcopy(self.real_image_A)
+            self.reference_image_B = copy.deepcopy(self.real_image_B)
+
+
         # Real data label is 1, fake data label is 0.
         self.real_label = torch.full((run.batch_size, self.channels), 1, device=run.device, dtype=torch.float32)
         self.fake_label = torch.full((run.batch_size, self.channels), 0, device=run.device, dtype=torch.float32)
@@ -693,34 +701,16 @@ class RunTrainManager:
 
         """ Store global reference images for A and B, only for the first epoch and image """
 
-        if i != 0 and epoch != 0:
-
-            # First batch during first epoch only
-            return
-
-        # Check if any of the reference variables contains a None
-        elif all(
-            ref is None
-            for ref in [
-                self.reference_image_A,
-                self.reference_image_B,
-                self.reference_fake_label,
-                self.reference_real_label,
-            ]
-        ):
+        # Only run this the first batch of the first epoch
+        if i == 0 and epoch == 0:
 
             # Store image tensors
-            self.reference_image_A = self.real_image_A
-            self.reference_image_B = self.real_image_B
+            self.reference_image_A = copy.deepcopy(self.real_image_A)
+            self.reference_image_B = copy.deepcopy(self.real_image_B)
 
             # Store labels
-            self.reference_real_label = self.real_label
-            self.reference_fake_label = self.fake_label
-
-        else:
-
-            # Error, raise Exception
-            raise Exception("\nError in reference images!\n")
+            self.reference_real_label = copy.deepcopy(self.real_label)
+            self.reference_fake_label = copy.deepcopy(self.fake_label)
 
         pass
 
@@ -736,49 +726,62 @@ class RunTrainManager:
         self.RANDOM_FLIP_PERCENTAGE = 0.0  # default: 0.10
         self.SMOOTHENING_PERCENTAGE = 0.0  # default: 0.10
 
-        # Noise is gone at epoch x
-        noise_until_epoch = self.NOISE_UNTIL_PERCENTAGE * run.num_epochs
+        restrictions = [self.NOISE_UNTIL_PERCENTAGE, self.RANDOM_FLIP_PERCENTAGE, self.SMOOTHENING_PERCENTAGE]
 
-        # Calculate noise factor
-        if self.NOISE_UNTIL_PERCENTAGE == 0:
-            self.noise_factor = 0
-        elif epoch > 0 and epoch <= int(round(run.num_epochs * self.NOISE_UNTIL_PERCENTAGE)):
-            self.noise_factor = round(1 - (epoch / noise_until_epoch), 3)
-        elif epoch > int(round(run.num_epochs * self.NOISE_UNTIL_PERCENTAGE)):
-            self.noise_factor = 0
+        # If all three restrictions are set to 0.0, just copy the images onto the distorted images
+        if all(value == 0.0 for value in [restrictions]):
+
+            self.generated_image_B2A_noise = self.generated_image_B2A
+            self.generated_image_A2B_noise = self.generated_image_A2B
+
+            self.real_image_A_noise = self.real_image_A
+            self.real_image_B_noise = self.real_image_B
+
+            self.real_smooth_label = self.real_label
+            self.fake_smooth_label = self.fake_label
+
+        # Else run the restrictions
         else:
-            self.noise_factor = 1
 
-        # Create the noise for the real images
-        noise_real_A = (torch.randn(self.real_image_A.size()) * std + mean).to(run.device)
-        noise_real_B = (torch.randn(self.real_image_B.size()) * std + mean).to(run.device)
+            # Noise is gone at epoch x
+            noise_until_epoch = self.NOISE_UNTIL_PERCENTAGE * run.num_epochs
 
-        # Create the noise for the fake images
-        noise_fake_A = (torch.randn(self.generated_image_B2A.size()) * std + mean).to(run.device)
-        noise_fake_B = (torch.randn(self.generated_image_A2B.size()) * std + mean).to(run.device)
+            # Calculate noise factor
+            if self.NOISE_UNTIL_PERCENTAGE == 0:
+                self.noise_factor = 0
+            elif epoch > 0 and epoch <= int(round(run.num_epochs * self.NOISE_UNTIL_PERCENTAGE)):
+                self.noise_factor = round(1 - (epoch / noise_until_epoch), 3)
+            elif epoch > int(round(run.num_epochs * self.NOISE_UNTIL_PERCENTAGE)):
+                self.noise_factor = 0
+            else:
+                self.noise_factor = 1
 
-        # Add decaying noise to the real images (only used by discriminator)
-        self.real_image_A_noise = self.real_image_A
-        #  + (noise_real_A * self.noise_factor)
-        self.real_image_B_noise = self.real_image_B
-        # + (noise_real_B * self.noise_factor)
+            # Create the noise for the real images
+            noise_real_A = (torch.randn(self.real_image_A.size()) * std + mean).to(run.device)
+            noise_real_B = (torch.randn(self.real_image_B.size()) * std + mean).to(run.device)
 
-        # Add decaying noise to the fake images (only used by discriminator)
-        self.generated_image_B2A_noise = self.generated_image_B2A
-        # + (noise_fake_A * self.noise_factor)
-        self.generated_image_A2B_noise = self.generated_image_A2B
-        #  + (noise_fake_B * self.noise_factor)
+            # Create the noise for the fake images
+            noise_fake_A = (torch.randn(self.generated_image_B2A.size()) * std + mean).to(run.device)
+            noise_fake_B = (torch.randn(self.generated_image_A2B.size()) * std + mean).to(run.device)
 
-        """ Label smoothing and random flipping """
+            # Add decaying noise to the real images (only used by discriminator)
+            self.real_image_A_noise = self.real_image_A + (noise_real_A * self.noise_factor)
+            self.real_image_B_noise = self.real_image_B + (noise_real_B * self.noise_factor)
 
-        # Smoothen the labels (only used by the discriminator)
-        self.real_smooth_label = self.__smooth_one_hot(self.real_label, 2, self.SMOOTHENING_PERCENTAGE)
-        self.fake_smooth_label = self.__smooth_one_hot(self.fake_label, 2, self.SMOOTHENING_PERCENTAGE)
+            # Add decaying noise to the fake images (only used by discriminator)
+            self.generated_image_B2A_noise = self.generated_image_B2A + (noise_fake_A * self.noise_factor)
+            self.generated_image_A2B_noise = self.generated_image_A2B + (noise_fake_B * self.noise_factor)
 
-        # Randomly flip the smooth labels (only used by the discriminator)
-        self.real_smooth_label, self.fake_smooth_label = self.__random_flip(
-            self.real_smooth_label, self.fake_smooth_label, self.RANDOM_FLIP_PERCENTAGE
-        )
+            """ Label smoothing and random flipping """
+
+            # Smoothen the labels (only used by the discriminator)
+            self.real_smooth_label = self.__smooth_one_hot(self.real_label, 2, self.SMOOTHENING_PERCENTAGE)
+            self.fake_smooth_label = self.__smooth_one_hot(self.fake_label, 2, self.SMOOTHENING_PERCENTAGE)
+
+            # Randomly flip the smooth labels (only used by the discriminator)
+            self.real_smooth_label, self.fake_smooth_label = self.__random_flip(
+                self.real_smooth_label, self.fake_smooth_label, self.RANDOM_FLIP_PERCENTAGE
+            )
 
         pass
 
@@ -843,26 +846,18 @@ class RunTrainManager:
         # Apply a gradient penalty to the cycle consistency-loss
         # Check if done, read 3.3 https://ssnl.github.io/better_cycles/report.pdf
 
-        gradient_penalty = GradientPenalty()
+        # gradient_penalty = GradientPenalty()
 
-        self.gradient_penalty_A = gradient_penalty(self.generated_image_B2A, self.generated_output_A)
-        self.gradient_penalty_B = gradient_penalty(self.generated_image_A2B, self.generated_output_B)
+        # self.gradient_penalty_A = gradient_penalty(self.generated_image_B2A, self.generated_output_A)
+        # self.gradient_penalty_B = gradient_penalty(self.generated_image_A2B, self.generated_output_B)
 
         # Cycle loss: A -> B -> A
         self.recovered_image_A = self.net_G_B2A(self.generated_image_A2B)
-        self.loss_cycle_ABA = (
-            self.cycle_loss(self.recovered_image_A, self.real_image_A)
-            * lambda_A2B
-            # * self.gradient_penalty_B
-        )
+        self.loss_cycle_ABA = self.cycle_loss(self.recovered_image_A, self.real_image_A) * lambda_A2B
 
         # Cycle loss: B -> A -> B
         self.recovered_image_B = self.net_G_A2B(self.generated_image_B2A)
-        self.loss_cycle_BAB = (
-            self.cycle_loss(self.recovered_image_B, self.real_image_B)
-            * lambda_B2A
-            # * self.gradient_penalty_A
-        )
+        self.loss_cycle_BAB = self.cycle_loss(self.recovered_image_B, self.real_image_B) * lambda_B2A
 
         """ Calculate the generator errors """
 
@@ -898,22 +893,6 @@ class RunTrainManager:
             # Update the Generator networks
             self.optimizer_G_A2B.step()
             self.optimizer_G_B2A.step()
-
-        else:
-
-            # Validation error G_A2B
-            self.v__error_G_A2B = self.loss_GAN_A2B + self.loss_identity_A2B + self.loss_cycle_ABA
-
-            # Validation error G_B2A
-            self.v__error_G_B2A = self.loss_GAN_B2A + self.loss_identity_B2A + self.loss_cycle_BAB
-
-            # Average validation error on G_A2B
-            self.v__cum_error_G_A2B += self.v__error_G_A2B
-            self.v__avg_error_G_A2B = self.v__cum_error_G_A2B / (i + 1)
-
-            # Average validation error on G_B2A
-            self.v__cum_error_G_B2A += self.v__error_G_B2A
-            self.v__avg_error_G_B2A = self.v__cum_error_G_B2A / (i + 1)
 
         pass
 
@@ -1040,11 +1019,11 @@ class RunTrainManager:
 
         pass
 
-    def __update_fid_score(self, run, i: int) -> None:
+    def __update_fid_score(self, run, i: int, interval: int) -> None:
 
         """ Calculate the FID Score """
 
-        if i % 1 == 0:
+        if i % interval == 0:
 
             paths_B2A = [
                 f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features/B2A/fake",
@@ -1076,30 +1055,17 @@ class RunTrainManager:
 
         """ Print progress """
 
-        # Print correct output if the current batch is used for training
-        if self.batch_is_validation == False:
-
-            self.progress_bar.set_description(
-                #
-                f"[{self.dataset_group.upper()}][{epoch + 1}/{run.num_epochs}][{i + 1}/{len(self.loader)}]"
-                f"[{self.noise_factor:.2f}|{self.SMOOTHENING_PERCENTAGE:.2f}|{self.RANDOM_FLIP_PERCENTAGE:.2f}]  ||  "
-                #
-                f"D_A, D_B: {self.avg_error_D_A:.3f} ; {self.avg_error_D_B:.3f} || "
-                f"G_A2B, G_B2A: {self.avg_error_G_A2B_adv_loss:.3f} ; {self.avg_error_G_B2A_adv_loss:.3f} || "
-                f"FID_A, FID_B: {self.fid_score_A:.3f} ; {self.fid_score_B:.3f} ||"
-                #
-            )
-
-        # Print correct output if the current batch is used for validation # deprecated
-        else:
-
-            self.progress_bar.set_description(
-                f"[{self.dataset_group.upper()}][{epoch + 1}/{run.num_epochs}][{i + 1}/{len(self.loader)}][nf={self.noise_factor:.3f}]  ||  "
-                f"v__avg_error_D_A: {self.v__avg_error_D_A:.3f} ; "
-                f"v__avg_error_D_B: {self.v__avg_error_D_B:.3f}  || "
-                f"v__avg_error_G_A2B: {self.v__avg_error_G_A2B:.3f} ; "
-                f"v__avg_error_G_B2A: {self.v__avg_error_G_B2A:.3f} || "
-            )
+        self.progress_bar.set_description(
+            #
+            f"[{self.dataset_group.upper()}][{epoch + 1}/{run.num_epochs}][{i + 1}/{len(self.loader)}]"
+            f"[{self.noise_factor:.2f}|{self.SMOOTHENING_PERCENTAGE:.2f}|{self.RANDOM_FLIP_PERCENTAGE:.2f}]  ||  "
+            #
+            f"D_A, D_B: {self.avg_error_D_A:.3f} ; {self.avg_error_D_B:.3f} || "
+            f"G_A2B, G_B2A: {self.avg_error_G_A2B_adv_loss:.3f} ; {self.avg_error_G_B2A_adv_loss:.3f} || "
+            f"FID_A, FID_B [train]: {self.fid_score_A:.3f} ; {self.fid_score_B:.3f} ||  "
+            f"FID_A, FID_B [valid]: {self.fid_score_reference_A:.3f} ; {self.fid_score_reference_B:.3f} ||"
+            #
+        )
 
         pass
 
@@ -1113,9 +1079,9 @@ class RunTrainManager:
         filepath_fake_B = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features/A2B/fake/{i + 1:04d}___fake_B.png"
         filepath_real_B = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features/A2B/real/{i + 1:04d}___real_B.png"
 
-        # Save all the generated (fake) image s
-        vutils.save_image(self.generated_image_B2A.detach(), filepath_fake_A, normalize=True)
-        vutils.save_image(self.generated_image_A2B.detach(), filepath_fake_B, normalize=True)
+        # Save all the generated (fake) images
+        vutils.save_image(self.generated_image_B2A_noise.detach(), filepath_fake_A, normalize=True)
+        vutils.save_image(self.generated_image_A2B_noise.detach(), filepath_fake_B, normalize=True)
         vutils.save_image(self.real_image_A.detach(), filepath_real_A, normalize=True)
         vutils.save_image(self.real_image_B.detach(), filepath_real_B, normalize=True)
 
@@ -1123,107 +1089,17 @@ class RunTrainManager:
 
         if i % self.SHOW_IMAGE_FREQ == 0:
 
-            if self.batch_is_validation == False:
+            # Write images real-time to feature vector directory
+            rt_filepath_fake_A = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/B2A___fake_A.png"
+            rt_filepath_real_A = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/B2A___real_A.png"
+            rt_filepath_fake_B = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/A2B___fake_B.png"
+            rt_filepath_real_B = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/A2B___real_B.png"
 
-                # Filepath and filename for the real-time TRAINING output images
-                (
-                    filepath_real_A,
-                    filepath_real_B,
-                    filepath_real_A_noise,
-                    filepath_real_B_noise,
-                    filepath_fake_A,
-                    filepath_fake_B,
-                    filepath_fake_A_noise,
-                    filepath_fake_B_noise,
-                ) = (
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/real_sample.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/real_sample.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/real_sample_noise.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/real_sample_noise.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/fake_sample.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/fake_sample.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/fake_sample_noise.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/fake_sample_noise.png",
-                )
-
-            else:
-                #
-                #  Filepath and filename for the real-time VALIDATION output images
-                (
-                    filepath_real_A,
-                    filepath_real_B,
-                    filepath_real_A_noise,
-                    filepath_real_B_noise,
-                    filepath_fake_A,
-                    filepath_fake_B,
-                    filepath_fake_A_noise,
-                    filepath_fake_B_noise,
-                ) = (
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__real_sample.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__real_sample.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__real_sample_noise.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__real_sample_noise.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__fake_sample.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__fake_sample.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/v__fake_sample_noise.png",
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/v__fake_sample_noise.png",
-                )
-
-            """ Save images in corresponding A and D folder """
-
-            # Save real input images
-            vutils.save_image(self.real_image_A, filepath_real_A, normalize=True)
-            vutils.save_image(self.real_image_B, filepath_real_B, normalize=True)
-
-            # Save real input images with noise
-            vutils.save_image(self.real_image_A_noise, filepath_real_A_noise, normalize=True)
-            vutils.save_image(self.real_image_B_noise, filepath_real_B_noise, normalize=True)
-
-            # Save the generated (fake) image
-            vutils.save_image(self.generated_image_B2A.detach(), filepath_fake_A, normalize=True)
-            vutils.save_image(self.generated_image_A2B.detach(), filepath_fake_B, normalize=True)
-
-            # Save the generated (fake) image
-            vutils.save_image(self.generated_image_B2A_noise.detach(), filepath_fake_A_noise, normalize=True)
-            vutils.save_image(self.generated_image_A2B_noise.detach(), filepath_fake_B_noise, normalize=True)
-
-            """ Save in /realtime folder """
-
-            # Images B2A (disparity -> stereo)
-            vutils.save_image(
-                self.generated_image_B2A.detach(),
-                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/B2A_generated_image_B2A.png",
-                normalize=True,
-            )
-            vutils.save_image(
-                self.real_image_B.detach(),
-                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/B2A_real_image_B.png",
-                normalize=True,
-            )
-
-            # Images A2B (stereo -> disparity)
-            vutils.save_image(
-                self.generated_image_A2B.detach(),
-                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/A2B_generated_image_A2B.png",
-                normalize=True,
-            )
-            vutils.save_image(
-                self.real_image_A.detach(),
-                f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/A2B_real_image_A_stereo.png",
-                normalize=True,
-            )
-
-            if self.dataset_group == "s2d":
-                vutils.save_image(
-                    self.real_image_A_left.detach(),
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/A2B_real_image_A_left.png",
-                    normalize=True,
-                )
-                # vutils.save_image(
-                #     self.real_image_A_right.detach(),
-                #     f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/A2B_real_image_A_right.png",
-                #     normalize=True,
-                # )
+            # Save all the generated (fake) images
+            vutils.save_image(self.generated_image_A2B_noise.detach(), rt_filepath_fake_B, normalize=True)
+            vutils.save_image(self.generated_image_B2A_noise.detach(), rt_filepath_fake_A, normalize=True)
+            vutils.save_image(self.real_image_B.detach(), rt_filepath_real_B, normalize=True)
+            vutils.save_image(self.real_image_A.detach(), rt_filepath_real_A, normalize=True)
 
         pass
 
@@ -1237,20 +1113,16 @@ class RunTrainManager:
             writer.writerow(
                 [
                     "Epoch",
-                    f"{self.error_D_A:.4f}",
-                    f"{self.error_D_B:.4f}",
-                    f"{self.error_G_A2B:.4f}",
-                    f"{self.error_G_B2A:.4f}",
-                    f"{self.loss_GAN_A2B:.4f}",
-                    f"{self.loss_GAN_B2A:.4f}",
-                    f"{self.loss_cycle_ABA:.4f}",
-                    f"{self.loss_cycle_BAB:.4f}",
-                    f"{self.loss_identity_A2B:.4f}",
-                    f"{self.loss_identity_B2A:.4f}",
-                    f"{self.v__error_D_A:.4f}",
-                    f"{self.v__error_D_B:.4f}",
-                    f"{self.v__error_G_A2B:.4f}",
-                    f"{self.v__error_G_B2A:.4f}",
+                    f"{self.error_D_A:.3f}",
+                    f"{self.error_D_B:.3f}",
+                    f"{self.error_G_A2B:.3f}",
+                    f"{self.error_G_B2A:.3f}",
+                    f"{self.loss_GAN_A2B:.3f}",
+                    f"{self.loss_GAN_B2A:.3f}",
+                    f"{self.loss_cycle_ABA:.3f}",
+                    f"{self.loss_cycle_BAB:.3f}",
+                    f"{self.loss_identity_A2B:.3f}",
+                    f"{self.loss_identity_B2A:.3f}",
                 ]
             )
 
@@ -1289,10 +1161,15 @@ class RunTrainManager:
 
         """ Save meta data and the parameters as .pickle files in """
 
+        # Save run.parameters as a pickle
+        self.save_pickle(self.parameters, "parameters.pickle", f"{self.DIR_WEIGHTS}/{self.RUN_PATH}")
+
         # Define meta data
-        META_DATA = {
-            "run": run,
-            "start_epoch": epoch,
+        self.metadata = {
+            "channels": int(run.channels),
+            "start_epoch": int(epoch),
+            "learning_rate_gen": float(run.learning_rate_gen),
+            "learning_rate_dis": float(run.learning_rate_dis),
             "lr_lambda": self.lr_lambda,
             "lr_scheduler_G_A2B": self.lr_scheduler_G_A2B,
             "lr_scheduler_G_B2A": self.lr_scheduler_G_B2A,
@@ -1302,135 +1179,64 @@ class RunTrainManager:
             "optimizer_G_A2B": self.optimizer_G_A2B,
             "optimizer_D_A": self.optimizer_D_A,
             "optimizer_D_B": self.optimizer_D_B,
-            "learning_rate_gen": run.learning_rate_gen,
-            "learning_rate_dis": run.learning_rate_dis,
         }
 
         # Save the meta data as a pickle
-        self.save_pickle(META_DATA, "metadata.pickle", f"{self.DIR_WEIGHTS}/{self.RUN_PATH}")
-
-        # Save run.parameters as a pickle
-        self.save_pickle(self.parameters, "parameters.pickle", f"{self.DIR_WEIGHTS}/{self.RUN_PATH}")
+        self.save_pickle(self.metadata, "metadata.pickle", f"{self.DIR_WEIGHTS}/{self.RUN_PATH}")
 
         pass
 
-    def __save_end_epoch_output(self, epoch) -> None:
-
-        """ Stores the current data and output as .png images (currently called at the end of each epoch) """
-
-        # Filepath and filename for the per-epoch output images
-        (
-            filepath_real_A,
-            filepath_real_B,
-            filepath_real_A_noise,
-            filepath_real_B_noise,
-            filepath_fake_A,
-            filepath_fake_B,
-            filepath_fake_A_noise,
-            filepath_fake_B_noise,
-        ) = (
-            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___real_sample.png",
-            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___real_sample.png",
-            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___real_sample_noise.png",
-            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___real_sample_noise.png",
-            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___fake_sample.png",
-            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___fake_sample.png",
-            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/A/epochs/EP{epoch}___fake_sample_noise.png",
-            f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___fake_sample_noise.png",
-        )
-
-        # GAN loss: D_A(G_B2A(B))
-        self.generated_image_B2A = self.net_G_B2A(self.reference_image_B)
-        self.generated_output_A = self.net_D_A(self.generated_image_B2A)
-        self.loss_GAN_B2A = self.adversarial_loss(self.generated_output_A, self.real_label)
-
-        # GAN loss: D_B(G_A2B(A))
-        self.generated_image_A2B = self.net_G_A2B(self.reference_image_A)
-        self.generated_output_B = self.net_D_B(self.generated_image_A2B)
-        self.loss_GAN_A2B = self.adversarial_loss(self.generated_output_B, self.real_label)
-
-        # Save real input images
-        vutils.save_image(self.real_image_A, filepath_real_A, normalize=True)
-        vutils.save_image(self.real_image_B, filepath_real_B, normalize=True)
-
-        # Save real input images with noise
-        if self.NOISE_UNTIL_PERCENTAGE != 0:
-            vutils.save_image(self.real_image_A_noise, filepath_real_A_noise, normalize=True)
-            vutils.save_image(self.real_image_B_noise, filepath_real_B_noise, normalize=True)
-
-        # Save the generated (fake) image
-        vutils.save_image(self.generated_image_B2A.detach(), filepath_fake_A, normalize=True)
-        vutils.save_image(self.generated_image_A2B.detach(), filepath_fake_B, normalize=True)
-
-        # Save the generated (fake) image
-        if self.NOISE_UNTIL_PERCENTAGE != 0:
-            vutils.save_image(self.generated_image_B2A_noise.detach(), filepath_fake_A_noise, normalize=True)
-            vutils.save_image(self.generated_image_A2B_noise.detach(), filepath_fake_B_noise, normalize=True)
-
-        # Check point dir
-        model_weights_dir = f"{self.DIR_WEIGHTS}/{self.RUN_PATH}"
-
-        if epoch % 5 == 0:
-
-            # Check points, save weights after each epoch
-            torch.save(self.net_G_A2B.state_dict(), f"{model_weights_dir}/net_G_A2B/net_G_A2B_epoch_{epoch:.0d}.pth")
-            torch.save(self.net_G_B2A.state_dict(), f"{model_weights_dir}/net_G_B2A/net_G_B2A_epoch_{epoch:.0d}.pth")
-            torch.save(self.net_D_A.state_dict(), f"{model_weights_dir}/net_D_A/net_D_A_epoch_{epoch:.0d}.pth")
-            torch.save(self.net_D_B.state_dict(), f"{model_weights_dir}/net_D_B/net_D_B_epoch_{epoch:.0d}.pth")
-
-        pass
-
-    def __save_per_epoch_snapshot(self, epoch: int) -> None:
+    def __save_reference_snapshot(self, run, epoch: int) -> None:
 
         """ Save the output generated using the references images """
 
-        # Create output for reference image A
-        generated_reference_image_B2A = self.net_G_B2A(self.reference_image_B)
-        generated_reference_output_A = self.net_D_A(generated_reference_image_B2A)
-        reference_loss_GAN_B2A = self.adversarial_loss(generated_reference_output_A, self.reference_real_label)
+        # Create output for reference images A and B
+        self.reference_A = self.net_G_B2A(self.reference_image_B)
+        self.reference_B = self.net_G_A2B(self.reference_image_A)
 
-        # Create output for reference image B
-        generated_reference_image_A2B = self.net_G_A2B(self.reference_image_A)
-        generated_reference_output_B = self.net_D_B(self.generated_image_A2B)
-        reference_loss_GAN_A2B = self.adversarial_loss(generated_reference_output_B, self.reference_fake_label)
+        """ Calculate RMSE losses """
 
-        # Concatenate with real image
-        reference_A = torch.cat((generated_reference_image_B2A, self.reference_image_A), dim=0)
-        reference_B = torch.cat((generated_reference_image_A2B, self.reference_image_B), dim=0)
+        # Define RMSE loss
+        mse_loss = nn.MSELoss()
 
-        # Define common filepath
-        COMMON_PATH = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features"
+        # Calculate MSE
+        mse_loss_B2A = mse_loss(self.reference_A.detach(), self.reference_image_A)
+        mse_loss_A2B = mse_loss(self.reference_B.detach(), self.reference_image_B)
 
-        # Filepaths
-        filepath_reference_A = f"{COMMON_PATH}/B2A/{epoch + 1:03d}___reference_A__{reference_loss_GAN_B2A:03d}.png"
-        filepath_reference_B = f"{COMMON_PATH}/A2B/{epoch + 1:03d}___reference_B__{reference_loss_GAN_A2B:03d}.png"
+        # Calculate RMSE
+        self.rmse_loss_reference_A = np.sqrt(mse_loss_B2A.cpu())
+        self.rmse_loss_reference_B = np.sqrt(mse_loss_A2B.cpu())
 
-        # Save generated reference samples
-        vutils.save_image(reference_A.detach(), filepath_reference_A, normalize=True)
-        vutils.save_image(reference_B.detach(), filepath_reference_B, normalize=True)
+        """ Create filepaths for saving """
 
-        """ Save weights every 5 epochs """
+        # Define the common filepath
+        COMMON_PATH = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/references"
 
-        # Check point dir
-        model_weights_dir = f"{self.DIR_WEIGHTS}/{self.RUN_PATH}"
+        # Filepaths for generated reference data
+        filepath_reference_A_real = f"{COMMON_PATH}/B2A/{0:03d}___A_RMSE0.000.png"
+        filepath_reference_B_real = f"{COMMON_PATH}/A2B/{0:03d}___A_RMSE0.000.png"
 
-        # Check points, save weights after each epoch --> overwrites every epoch
-        torch.save(self.net_G_A2B.state_dict(), f"{model_weights_dir}/latest/net_G_A2B.pth")
-        torch.save(self.net_G_B2A.state_dict(), f"{model_weights_dir}/latest/net_G_B2A.pth")
-        torch.save(self.net_D_A.state_dict(), f"{model_weights_dir}/latest/net_D_A.pth")
-        torch.save(self.net_D_B.state_dict(), f"{model_weights_dir}/latest/net_D_B.pth")
+        # Save original reference data only once
+        if epoch == 0:
 
-        if epoch % 5 == 0:
+            # Save the original reference images
+            vutils.save_image(self.reference_image_A.detach(), filepath_reference_A_real, normalize=True)
+            vutils.save_image(self.reference_image_B.detach(), filepath_reference_B_real, normalize=True)
 
-            # Check points, save weights after each epoch
-            torch.save(self.net_G_A2B.state_dict(), f"{model_weights_dir}/net_G_A2B/net_G_A2B_epoch_{epoch + 1:03d}.pth")
-            torch.save(self.net_G_B2A.state_dict(), f"{model_weights_dir}/net_G_B2A/net_G_B2A_epoch_{epoch + 1:03d}.pth")
-            torch.save(self.net_D_A.state_dict(), f"{model_weights_dir}/net_D_A/net_D_A_epoch_{epoch + 1:03d}.pth")
-            torch.save(self.net_D_B.state_dict(), f"{model_weights_dir}/net_D_B/net_D_B_epoch_{epoch + 1:03d}.pth")
+        # Filepaths for generated reference data
+        filepath_reference_A = f"{COMMON_PATH}/B2A/{epoch + 1:03d}___A_RMSE{self.rmse_loss_reference_A:.3f}.png"
+        filepath_reference_B = f"{COMMON_PATH}/A2B/{epoch + 1:03d}___B_RMSE{self.rmse_loss_reference_B:.3f}.png"
 
-        return
+        # Save generated reference images every epoch
+        if epoch % self.SAVE_EPOCH_FREQ == 0:
 
-    def __save_end_epoch_logs(self, epoch, run) -> None:
+            # Save generated reference data + ground truth data in one image
+            vutils.save_image(self.reference_A.detach(), filepath_reference_A, normalize=True)
+            vutils.save_image(self.reference_B.detach(), filepath_reference_B, normalize=True)
+
+        pass
+
+    def __save_end_epoch_logs(self, run, epoch) -> None:
 
         """ Saves the noise, mse losses and average errors to a newline in the previously created .csv file (at the end of each epoch) """
 
@@ -1442,6 +1248,10 @@ class RunTrainManager:
                     f"{self.noise_factor:.3f}",
                     f"{self.fid_score_A:.3f}",
                     f"{self.fid_score_B:.3f}",
+                    f"{self.fid_score_reference_A:.3f}"
+                    f"{self.fid_score_reference_B:.3f}"
+                    f"{self.rmse_loss_reference_A:.3f}"
+                    f"{self.rmse_loss_reference_B:.3f}"
                     f"{self.avg_mse_loss_generated_A:.3f}",
                     f"{self.avg_mse_loss_generated_B:.3f}",
                     f"{self.avg_rmse_loss_generated_A:.3f}",
@@ -1646,7 +1456,7 @@ class RunTrainManager:
 
         pass
 
-    """ Save and load pickles """
+    """ [ Public ] Functions to save and load pickle files """
 
     def save_pickle(self, data, name: str, filepath_full: str):
 
@@ -1714,16 +1524,19 @@ class RunTrainManager:
 
         if dir == "outputs":
             try:
+                os.makedirs(os.path.join(path, "references", "B2A"))
+                os.makedirs(os.path.join(path, "references", "A2B"))
+                #
                 os.makedirs(os.path.join(path, "realtime", "features", "B2A", "fake"))
                 os.makedirs(os.path.join(path, "realtime", "features", "B2A", "real"))
                 os.makedirs(os.path.join(path, "realtime", "features", "A2B", "fake"))
                 os.makedirs(os.path.join(path, "realtime", "features", "A2B", "real"))
                 os.makedirs(os.path.join(path, "logs"))
                 os.makedirs(os.path.join(path, "plots"))
-                os.makedirs(os.path.join(path, "A"))
-                os.makedirs(os.path.join(path, "B"))
-                os.makedirs(os.path.join(path, "A", "epochs"))
-                os.makedirs(os.path.join(path, "B", "epochs"))
+                # os.makedirs(os.path.join(path, "A"))
+                # os.makedirs(os.path.join(path, "B"))
+                # os.makedirs(os.path.join(path, "A", "epochs"))
+                # os.makedirs(os.path.join(path, "B", "epochs"))
             except OSError:
                 pass
 
@@ -1783,36 +1596,37 @@ PARAMETERS: OrderedDict = OrderedDict(
     learning_rate_gen=[0.0002],
     num_epochs=[200],
     decay_epochs=[100],
+    #
 )
 
 
 # Execute main code
 if __name__ == "__main__":
 
+    # Clear the terminal
+    os.system("cls")
+
     try:
 
-        # Clear the terminal
-        # os.system("cls")
-
         # Basic settings
-        channels = PARAMETERS["channels"][0]
         group = PARAMETERS["dataset_group"][0]
+        channels = PARAMETERS["channels"][0]
 
         # Get dataset
         dataset = MyDataLoader().get_dataset(group, "Test_Set_RGB_DISPARITY", "train", (100, 180), channels, False)
 
-        # Initiate manager
-        manager = RunTrainManager(dataset, channels, PARAMETERS)
-
-        # Define folder filepaths
-        folder_weights = os.path.join("weights", "s2d")
-        folder_runpath = os.path.join("Test_Set_RGB_DISPARITY", "2021-06-30", "06.19.02___EP200_DE100_LRG0.0002_CH3")
+        # Define folder "run path"
+        folder_runpath = os.path.join("Test_Set_RGB_DISPARITY", "2021-06-30", "")
 
         # Define models folder path
-        folder_models = os.path.join(folder_weights, folder_runpath)
+        models_directory = os.path.join("weights", "s2d", folder_runpath)
+
+        # Initiate manager
+        manager = RunTrainManager(dataset, PARAMETERS, models_directory, False)
+        # manager = RunTrainManager(dataset, PARAMETERS, models_directory, True)
 
         # Start training
-        manager.start_cycle(use_pretrained_models=False, folder_models=folder_models)
+        manager.start_cycle()
 
         """
 

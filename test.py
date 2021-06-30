@@ -430,6 +430,7 @@ PARAMETERS: OrderedDict = OrderedDict(
 # Execute main code
 if __name__ == "__main__":
 
+    
     try:
 
         mydataloader = MyDataLoader()
@@ -451,8 +452,8 @@ if __name__ == "__main__":
             model_date=f"2021-06-29",
             model_name=f"12.05.35___EP200_DE100_LRG0.0002_CH3",
             # Generator model names
-            model_netG_A2B=f"net_G_A2B_epoch_80.pth",
-            model_netG_B2A=f"net_G_B2A_epoch_80.pth",
+            model_netG_A2B=f"net_G_A2B.pth",
+            model_netG_B2A=f"net_G_B2A.pth",
         )
 
         """
