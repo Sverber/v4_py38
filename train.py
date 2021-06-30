@@ -6,11 +6,13 @@ from __future__ import absolute_import, division, print_function
 import os
 import csv
 import sys
+import time
 import yaml
 import random
 import numpy as np
 import matplotlib.pyplot as plt
 
+import pickle
 import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
@@ -37,14 +39,10 @@ from utils.models.cycle.Discriminator import Discriminator
 from utils.tools.yaml_reader import read_yaml
 from utils.tools.pytorch_fid.src.pytorch_fid.fid_score import calculate_fid_given_paths
 
-from numpy import cov
+from numpy import cov, disp
 from numpy import trace
 from numpy import iscomplexobj
 from scipy.linalg import sqrtm
-
-
-# Clear the terminal
-os.system("cls")
 
 
 class GradientPenalty(Module):
@@ -72,6 +70,7 @@ class Epoch:
 
 class Run:
     def __init__(self):
+
         self.params = None
         self.count = 0
         self.data = []
@@ -98,13 +97,18 @@ class RunTrainManager:
         validation_percentage: float = 0.0,
     ) -> None:
 
+        # Clear the terminal
+        os.system("cls")
+
         """ [ Insert documentation ] """
 
-        # Arguments
+        # Arguments: parameters
         self.parameters = parameters
+        self.channels = channels
+
+        # Arguments: dataset
         self.dataset = dataset
         self.dataset_group = dataset.dataset_group
-        self.channels = channels
         self.validation_percentage = validation_percentage
 
         # Configuration
@@ -112,6 +116,7 @@ class RunTrainManager:
         self.DIR_OUTPUTS = f"{dir_outputs}/{self.dataset_group}"
         self.DIR_RESULTS = f"{dir_results}/{self.dataset_group}"
         self.DIR_WEIGHTS = f"{dir_weights}/{self.dataset_group}"
+
         self.SHOW_IMAGE_FREQ = show_image_freq
         self.SHOW_GRAPH_FREQ = show_graph_freq
         self.SAVE_EPOCH_FREQ = save_epoch_freq
@@ -132,137 +137,43 @@ class RunTrainManager:
         # Runs
         self.runs = self.__build_cycle(parameters)
 
+        # Define pre-trained models state
+        self.use_pretrained_models = False
+
+        # Starting epoch
+        self.start_epoch = 0
+
         pass
 
     """ [ Public ] Starts the training loop """
 
-    def start_cycle(self) -> None:
+    def start_cycle(self, use_pretrained_models: bool = False, folder_models: str = None) -> None:
+
+        """ Training cyclus """
+
+        # Handles the arguments of the start function
+        self.__handle_starting_arguments(use_pretrained_models, folder_models)
+
+        """ Start training  """
 
         # Iterate over every run, based on the configurated params
         for run in self.runs:
 
-            # Clear occupied CUDA memory
-            torch.cuda.empty_cache()
+            # Initialize the networks
+            self.__init_networks(run)
 
-            # Set a random seed for reproducibility
-            random.seed(run.manual_seed)
-            torch.manual_seed(run.manual_seed)
-
-            # Create the directory path for this run
-            self.RUN_PATH = self.get_run_path(run, self.dataset.name, self.channels)
-
-            # Make required directories for storing the training output
-            self.makedirs(path=os.path.join(self.DIR_WEIGHTS, self.RUN_PATH), dir="weights")
-            self.makedirs(path=os.path.join(self.DIR_OUTPUTS, self.RUN_PATH), dir="outputs")
-
-            # Create a per-epoch csv log file
-            self.__create_per_epoch_csv_logs()
-
-            # Create Generator and Discriminator models # in_channels; # out_channels
-            self.net_G_A2B = Generator(in_channels=self.channels, out_channels=self.channels).to(run.device)
-            self.net_G_B2A = Generator(in_channels=self.channels, out_channels=self.channels).to(run.device)
-            self.net_D_A = Discriminator(in_channels=self.channels, out_channels=self.channels).to(run.device)
-            self.net_D_B = Discriminator(in_channels=self.channels, out_channels=self.channels).to(run.device)
-
-            # Apply weights
-            self.net_G_A2B.apply(self.__initialize_weights)
-            self.net_G_B2A.apply(self.__initialize_weights)
-            self.net_D_A.apply(self.__initialize_weights)
-            self.net_D_B.apply(self.__initialize_weights)
-
-            # define loss functions
-            self.cycle_loss = torch.nn.L1Loss().to(run.device)
-            self.identity_loss = torch.nn.L1Loss().to(run.device)
-            self.adversarial_loss = torch.nn.MSELoss().to(run.device)
-
-            # Optimizers
-            self.optimizer_G_A2B = torch.optim.Adam(
-                self.net_G_A2B.parameters(), lr=run.learning_rate_gen, betas=(0.5, 0.999)
-            )
-            self.optimizer_G_B2A = torch.optim.Adam(
-                self.net_G_B2A.parameters(), lr=run.learning_rate_gen, betas=(0.5, 0.999)
-            )
-            self.optimizer_D_A = torch.optim.Adam(
-                self.net_D_A.parameters(), lr=run.learning_rate_dis, betas=(0.5, 0.999)
-            )
-            self.optimizer_D_B = torch.optim.Adam(
-                self.net_D_B.parameters(), lr=run.learning_rate_dis, betas=(0.5, 0.999)
-            )
-
-            # Learning rates
-            self.lr_lambda = DecayLR(run.num_epochs, 0, run.decay_epochs).step
-            self.lr_scheduler_G_A2B = torch.optim.lr_scheduler.LambdaLR(self.optimizer_G_A2B, lr_lambda=self.lr_lambda)
-            self.lr_scheduler_G_B2A = torch.optim.lr_scheduler.LambdaLR(self.optimizer_G_B2A, lr_lambda=self.lr_lambda)
-            self.lr_scheduler_D_A = torch.optim.lr_scheduler.LambdaLR(self.optimizer_D_A, lr_lambda=self.lr_lambda)
-            self.lr_scheduler_D_B = torch.optim.lr_scheduler.LambdaLR(self.optimizer_D_B, lr_lambda=self.lr_lambda)
-
-            # Buffers train
-            self.fake_A_buffer = ReplayBuffer()
-            self.fake_B_buffer = ReplayBuffer()
-
-            # Dataloader train set
-            self.loader = DataLoader(
-                dataset=self.dataset, batch_size=run.batch_size, num_workers=run.num_workers, shuffle=run.shuffle
-            )
-
-            # Determine the batch-index from which the validation set starts
-            self.validation_batch_index: int = int(round(int(len(self.loader) * (1 - self.validation_percentage)), 0))
-
-            # Keep track of the per-epoch losses
-            self.losses_G_A2B, self.losses_G_B2A = [], []
-            self.losses_G_A2B_adv, self.losses_G_B2A_adv = [], []
-            self.losses_D_A, self.losses_D_B = [], []
-
-            # Keep track of the per-epoch average MSE loss
-            self.avg_mse_loss_generated_A_array = []
-            self.avg_mse_loss_generated_B_array = []
-
-            # Keep track of the per-epoch average MSE loss
-            self.avg_rmse_loss_generated_A_array = []
-            self.avg_rmse_loss_generated_B_array = []
-
-            # # Keep track of the per-epoch average MSE loss
-            self.avg_fid_score_generated_A_array = []
-            self.avg_fid_score_generated_B_array = []
-
-            # Keep track of the FID score
-            self.fid_score_A, self.fid_score_B = 0, 0
-
-            # Keep track of the per-epoch noise factor
-            self.noise_factor_array = []
+            # Declare the other variables for this run
+            self.__declare_variables_run(run)
 
             """ Iterate over the epochs in the run """
 
             # Iterate through all the epochs
-            for epoch in range(0, run.num_epochs):
+            for epoch in range(self.start_epoch, run.num_epochs):
 
-                # Keep track of the per-batch losses during one epoch
-                self.batch_losses_G_A2B, self.batch_losses_G_B2A = [], []
-                self.batch_losses_G_A2B_adv, self.batch_losses_G_B2A_adv = [], []
-                self.batch_losses_D_A, self.batch_losses_D_B = [], []
+                """ Declare all per-epoch variables """
 
-                self.batch_losses_error_D_real_A, self.batch_losses_error_D_real_B = [], []
-                self.batch_losses_error_D_fake_A, self.batch_losses_error_D_fake_B = [], []
-
-                self.full_batch_losses_G_A, self.full_batch_losses_G_B = [], []
-
-                # Keep track of the MSE losses of the generated images
-                self.cum_mse_loss_generated_A, self.cum_mse_loss_generated_B = 0, 0
-                self.avg_mse_loss_generated_A, self.avg_mse_loss_generated_B = 0, 0
-
-                # Keep track of the RMSE losses of the generated images
-                self.cum_rmse_loss_generated_A, self.cum_rmse_loss_generated_B = 0, 0
-                self.avg_rmse_loss_generated_A, self.avg_rmse_loss_generated_B = 0, 0
-
-                # Keep track of the FID scores of the generated images
-                self.cum_fid_score_generated_A, self.cum_fid_score_generated_B = 0, 0
-                self.avg_fid_score_generated_A, self.avg_fid_score_generated_B = 0, 0
-
-                # Create a per-batch csv log file
-                self.__create_per_batch_csv_logs(epoch)
-
-                # Set error variables at 0 at the begin of each epoch
-                self.__set_error_variables_to_zero()
+                # Declare the other variables for this epoch
+                self.__declare_variables_epoch(epoch)
 
                 """ Iterate over training data using the progress bar """
 
@@ -277,6 +188,9 @@ class RunTrainManager:
 
                     # Read data
                     self.__read_data(run, data)
+
+                    # Make reference image
+                    self.__set_reference_data(i, data)
 
                     # Update generator networks
                     self.__update_generators(i)
@@ -310,8 +224,8 @@ class RunTrainManager:
                 # Update learning rates after each epoch
                 self.__update_learning_rate()
 
-                # Save the output at the end of each epoch
-                self.__save_end_epoch_output(epoch)
+                # Save a snapshot of the generated output using the reference images
+                self.__save_per_epoch_snapshot(epoch)
 
                 # Save some logs at the end of each epoch
                 self.__save_end_epoch_logs(epoch, run)
@@ -319,17 +233,25 @@ class RunTrainManager:
                 # Save the losses in a plot of each epoch
                 self.__save_plot_per_epoch()
 
+                # # Save the output at the end of each epoch
+                # self.__save_end_epoch_output(epoch) # deprecated
+
+                """ Save latest model """
+
+                # Save model weights
+                self.__save_weights(epoch, False)
+
+                # Save meta data
+                self.__save_meta_data(run, epoch)
+
             """ Save final model """
 
-            # Save last check points, after every run
-            torch.save(self.net_G_A2B.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_G_A2B/net_G_A2B.pth")
-            torch.save(self.net_G_B2A.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_G_B2A/net_G_B2A.pth")
-            torch.save(self.net_D_A.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_D_A/net_D_A.pth")
-            torch.save(self.net_D_B.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_D_B/net_D_B.pth")
+            # Save final model weights
+            self.__save_weights(epoch, True)
 
         pass
 
-    """ [ Private ] Build the training cycle according the parameters """
+    """" [ Private ] Build the training cycle according the parameters """
 
     def __build_cycle(self, parameters) -> list:
 
@@ -343,6 +265,245 @@ class RunTrainManager:
             self.runs.append(run(*v))
 
         return self.runs
+
+    def __init_networks(self, run) -> None:
+
+        """ Initialize the networks and other components/variables """
+
+        # Clear the terminal
+        os.system("cls")
+
+        # Clear occupied CUDA memory
+        torch.cuda.empty_cache()
+
+        # Set a random seed for reproducibility
+        random.seed(run.manual_seed)
+        torch.manual_seed(run.manual_seed)
+
+        # Create the directory path for this run
+        self.RUN_PATH = self.get_run_path(run, self.dataset.name, self.channels)
+
+        # Make required directories for storing the training output
+        self.makedirs(path=os.path.join(self.DIR_OUTPUTS, self.RUN_PATH), dir="outputs")
+
+        # Create a per-epoch csv log file
+        self.__create_per_epoch_csv_logs()
+
+        """ Create network models, use pre-trained weight or new weights """
+
+        # Load the un-trained weights into our models
+        if self.use_pretrained_models == False:
+            self.__load_weights_untrained(run)
+
+        # Load the pre-trained model weights into our models
+        else:
+            self.__load_weights_pretrained(False, self.folder_models)
+
+        pass
+
+    """ [ Private ] Functions to load the networks and define other components- and variables """
+
+    def __load_weights_untrained(self, run) -> None:
+
+        # Define loss functions
+        self.cycle_loss = torch.nn.L1Loss().to(run.device)
+        self.identity_loss = torch.nn.L1Loss().to(run.device)
+        self.adversarial_loss = torch.nn.MSELoss().to(run.device)
+
+        # Create Generator and Discriminator models # in_channels; # out_channels
+        self.net_G_A2B = Generator(in_channels=self.channels, out_channels=self.channels).to(run.device)
+        self.net_G_B2A = Generator(in_channels=self.channels, out_channels=self.channels).to(run.device)
+        self.net_D_A = Discriminator(in_channels=self.channels, out_channels=self.channels).to(run.device)
+        self.net_D_B = Discriminator(in_channels=self.channels, out_channels=self.channels).to(run.device)
+
+        # Apply weights
+        self.net_G_A2B.apply(self.__initialize_weights)
+        self.net_G_B2A.apply(self.__initialize_weights)
+        self.net_D_A.apply(self.__initialize_weights)
+        self.net_D_B.apply(self.__initialize_weights)
+
+        # Optimizers
+        self.optimizer_G_A2B = torch.optim.Adam(
+            self.net_G_A2B.parameters(), lr=run.learning_rate_gen, betas=(0.5, 0.999)
+        )
+        self.optimizer_G_B2A = torch.optim.Adam(
+            self.net_G_B2A.parameters(), lr=run.learning_rate_gen, betas=(0.5, 0.999)
+        )
+        self.optimizer_D_A = torch.optim.Adam(self.net_D_A.parameters(), lr=run.learning_rate_dis, betas=(0.5, 0.999))
+        self.optimizer_D_B = torch.optim.Adam(self.net_D_B.parameters(), lr=run.learning_rate_dis, betas=(0.5, 0.999))
+
+        # Learning rates
+        self.lr_lambda = DecayLR(run.num_epochs, self.start_epoch, run.decay_epochs).step
+        self.lr_scheduler_G_A2B = torch.optim.lr_scheduler.LambdaLR(self.optimizer_G_A2B, lr_lambda=self.lr_lambda)
+        self.lr_scheduler_G_B2A = torch.optim.lr_scheduler.LambdaLR(self.optimizer_G_B2A, lr_lambda=self.lr_lambda)
+        self.lr_scheduler_D_A = torch.optim.lr_scheduler.LambdaLR(self.optimizer_D_A, lr_lambda=self.lr_lambda)
+        self.lr_scheduler_D_B = torch.optim.lr_scheduler.LambdaLR(self.optimizer_D_B, lr_lambda=self.lr_lambda)
+
+        pass
+
+    def __load_weights_pretrained(self, final_model: bool, folder_models: str) -> None:
+
+        # Load pickled metadata
+        pickled_metadata = self.load_pickle(os.path.join(folder_models, "metadata.pickle"))
+
+        # Redefine run
+        run = pickled_metadata["run"]
+
+        # Decompose filepath into multipe paths for the latest models
+
+        filepath_G_B2A = os.path.join(folder_models, "latest", "net_G_B2A.pth")
+        filepath_G_A2B = os.path.join(folder_models, "latest", "net_G_A2B.pth")
+        filepath_D_A = os.path.join(folder_models, "latest", "net_D_A.pth")
+        filepath_D_B = os.path.join(folder_models, "latest", "net_D_B.pth")
+
+        # Use final model weights instead if requested
+        if final_model == True:
+
+            filepath_G_B2A = os.path.join(folder_models, "net_G_B2A", "net_G_B2A.pth")
+            filepath_G_A2B = os.path.join(folder_models, "net_G_A2B", "net_G_A2B.pth")
+            filepath_D_A = os.path.join(folder_models, "net_D_A", "net_D_A.pth")
+            filepath_D_B = os.path.join(folder_models, "net_D_B", "net_D_B.pth")
+
+        # Create generator models
+        self.net_G_B2A = Generator(channels, channels).to(run.device)
+        self.net_G_A2B = Generator(channels, channels).to(run.device)
+
+        # Create discriminator models
+        self.net_D_A = Discriminator(channels, channels).to(run.device)
+        self.net_D_B = Discriminator(channels, channels).to(run.device)
+
+        # Load state dicts of onto Generators
+        self.net_G_B2A.load_state_dict(torch.load(filepath_G_B2A))
+        self.net_G_A2B.load_state_dict(torch.load(filepath_G_A2B))
+
+        # Load state dicts of onto Discriminators
+        self.net_D_A.load_state_dict(torch.load(filepath_D_A))
+        self.net_D_B.load_state_dict(torch.load(filepath_D_B))
+
+        # Set model modes
+        self.net_G_B2A.eval()
+        self.net_G_A2B.eval()
+        self.net_D_A.eval()
+        self.net_D_B.eval()
+
+        # Define loss functions
+        self.cycle_loss = torch.nn.L1Loss().to(run.device)
+        self.identity_loss = torch.nn.L1Loss().to(run.device)
+        self.adversarial_loss = torch.nn.MSELoss().to(run.device)
+
+        # Optimizers
+        self.optimizer_G_B2A = pickled_metadata["optimizer_G_B2A"]
+        self.optimizer_G_A2B = pickled_metadata["optimizer_G_A2B"]
+        self.optimizer_D_A = pickled_metadata["optimizer_D_A"]
+        self.optimizer_D_B = pickled_metadata["optimizer_D_B"]
+
+        # Learning rates
+        self.lr_lambda = pickled_metadata["lr_lambda"]
+        self.lr_lambda = DecayLR(run.num_epochs, self.start_epoch, run.decay_epochs).step
+        self.lr_scheduler_G_A2B = pickled_metadata["lr_scheduler_G_A2B"]
+        self.lr_scheduler_G_B2A = pickled_metadata["lr_scheduler_G_B2A"]
+        self.lr_scheduler_D_A = pickled_metadata["lr_scheduler_D_A"]
+        self.lr_scheduler_D_B = pickled_metadata["lr_scheduler_D_B"]
+
+        # Set starting epoch
+        self.start_epoch = pickled_metadata.start_epoch
+
+        # Sleep
+        time.sleep(3)
+
+        pass
+
+    def __declare_variables_run(self, run) -> None:
+
+        # Buffers train
+        self.fake_A_buffer = ReplayBuffer()
+        self.fake_B_buffer = ReplayBuffer()
+
+        # Dataloader train set
+        self.loader = DataLoader(
+            dataset=self.dataset, batch_size=run.batch_size, num_workers=run.num_workers, shuffle=run.shuffle
+        )
+
+        # Determine the batch-index from which the validation set starts
+        self.validation_batch_index: int = int(round(int(len(self.loader) * (1 - self.validation_percentage)), 0))
+
+        # Keep track of the per-epoch losses
+        self.losses_G_A2B, self.losses_G_B2A = [], []
+        self.losses_G_A2B_adv, self.losses_G_B2A_adv = [], []
+        self.losses_D_A, self.losses_D_B = [], []
+
+        # Keep track of the per-epoch average MSE loss
+        self.avg_mse_loss_generated_A_array = []
+        self.avg_mse_loss_generated_B_array = []
+
+        # Keep track of the per-epoch average MSE loss
+        self.avg_rmse_loss_generated_A_array = []
+        self.avg_rmse_loss_generated_B_array = []
+
+        # # Keep track of the per-epoch average MSE loss
+        self.avg_fid_score_generated_A_array = []
+        self.avg_fid_score_generated_B_array = []
+
+        # Keep track of the FID score
+        self.fid_score_A, self.fid_score_B = 0, 0
+
+        # Keep track of the per-epoch noise factor
+        self.noise_factor_array = []
+
+        pass
+
+    def __declare_variables_epoch(self, epoch: int) -> None:
+
+        # Declare references
+        self.reference_image_A, self.reference_image_B = None, None
+        self.reference_fake_label, self.reference_real_label = None, None
+
+        # Keep track of the per-batch losses during one epoch
+        self.batch_losses_G_A2B, self.batch_losses_G_B2A = [], []
+        self.batch_losses_G_A2B_adv, self.batch_losses_G_B2A_adv = [], []
+        self.batch_losses_D_A, self.batch_losses_D_B = [], []
+
+        self.batch_losses_error_D_real_A, self.batch_losses_error_D_real_B = [], []
+        self.batch_losses_error_D_fake_A, self.batch_losses_error_D_fake_B = [], []
+
+        self.full_batch_losses_G_A, self.full_batch_losses_G_B = [], []
+
+        # Keep track of the MSE losses of the generated images
+        self.cum_mse_loss_generated_A, self.cum_mse_loss_generated_B = 0, 0
+        self.avg_mse_loss_generated_A, self.avg_mse_loss_generated_B = 0, 0
+
+        # Keep track of the RMSE losses of the generated images
+        self.cum_rmse_loss_generated_A, self.cum_rmse_loss_generated_B = 0, 0
+        self.avg_rmse_loss_generated_A, self.avg_rmse_loss_generated_B = 0, 0
+
+        # Keep track of the FID scores of the generated images
+        self.cum_fid_score_generated_A, self.cum_fid_score_generated_B = 0, 0
+        self.avg_fid_score_generated_A, self.avg_fid_score_generated_B = 0, 0
+
+        # Create a per-batch csv log file
+        self.__create_per_batch_csv_logs(epoch)
+
+        # Set error variables at 0 at the begin of each epoch
+        self.__set_error_variables_to_zero()
+
+        pass
+
+    def __handle_starting_arguments(self, use_pretrained_models: bool, folder_models: str) -> None:
+
+        # Define variables
+        self.folder_models = folder_models
+        self.use_pretrained_models = use_pretrained_models
+
+        # Load parameters and redefine runs
+        if self.use_pretrained_models == True:
+
+            # Load pickled parameters
+            self.parameters = self.load_pickle(os.path.join(self.folder_models, "parameters.pickle"))
+
+            # Runs
+            self.runs = self.__build_cycle(self.parameters)
+
+        pass
 
     """ [ Private ] Functions to initialize variables and weights """
 
@@ -454,10 +615,12 @@ class RunTrainManager:
                     "avg_error_D_B",
                     "avg_error_G_A",
                     "avg_error_G_B",
-                    "v__avg_error_D_A",
-                    "v__avg_error_D_B",
-                    "v__avg_error_G_A",
-                    "v__avg_error_G_B",
+                    "cycle_loss_A",
+                    "cycle_loss_B",
+                    "adv_loss_A",
+                    "adv_loss_B",
+                    "idt_loss_A",
+                    "idt_loss_B",
                 ]
             )
 
@@ -508,6 +671,7 @@ class RunTrainManager:
 
             # Add the left- and right into one image (image A)
             # self.real_image_A = real_image_A_left
+            # self.real_image_A = torch.cat((real_image_A_left, real_image_A_right), dim=0)
             self.real_image_A = torch.add(real_image_A_left, real_image_A_right)
 
             # Normalize again
@@ -522,6 +686,41 @@ class RunTrainManager:
         # Real data label is 1, fake data label is 0.
         self.real_label = torch.full((run.batch_size, self.channels), 1, device=run.device, dtype=torch.float32)
         self.fake_label = torch.full((run.batch_size, self.channels), 0, device=run.device, dtype=torch.float32)
+
+        pass
+
+    def __set_reference_data(self, i: int, epoch: int,) -> None:
+
+        """ Store global reference images for A and B, only for the first epoch and image """
+
+        if i != 0 and epoch != 0:
+
+            # First batch during first epoch only
+            return
+
+        # Check if any of the reference variables contains a None
+        elif all(
+            ref is None
+            for ref in [
+                self.reference_image_A,
+                self.reference_image_B,
+                self.reference_fake_label,
+                self.reference_real_label,
+            ]
+        ):
+
+            # Store image tensors
+            self.reference_image_A = self.real_image_A
+            self.reference_image_B = self.real_image_B
+
+            # Store labels
+            self.reference_real_label = self.real_label
+            self.reference_fake_label = self.fake_label
+
+        else:
+
+            # Error, raise Exception
+            raise Exception("\nError in reference images!\n")
 
         pass
 
@@ -559,12 +758,16 @@ class RunTrainManager:
         noise_fake_B = (torch.randn(self.generated_image_A2B.size()) * std + mean).to(run.device)
 
         # Add decaying noise to the real images (only used by discriminator)
-        self.real_image_A_noise = self.real_image_A + (noise_real_A * self.noise_factor)
-        self.real_image_B_noise = self.real_image_B + (noise_real_B * self.noise_factor)
+        self.real_image_A_noise = self.real_image_A
+        #  + (noise_real_A * self.noise_factor)
+        self.real_image_B_noise = self.real_image_B
+        # + (noise_real_B * self.noise_factor)
 
         # Add decaying noise to the fake images (only used by discriminator)
-        self.generated_image_B2A_noise = self.generated_image_B2A + (noise_fake_A * self.noise_factor)
-        self.generated_image_A2B_noise = self.generated_image_A2B + (noise_fake_B * self.noise_factor)
+        self.generated_image_B2A_noise = self.generated_image_B2A
+        # + (noise_fake_A * self.noise_factor)
+        self.generated_image_A2B_noise = self.generated_image_A2B
+        #  + (noise_fake_B * self.noise_factor)
 
         """ Label smoothing and random flipping """
 
@@ -1016,11 +1219,11 @@ class RunTrainManager:
                     f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/A2B_real_image_A_left.png",
                     normalize=True,
                 )
-                vutils.save_image(
-                    self.real_image_A_right.detach(),
-                    f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/A2B_real_image_A_right.png",
-                    normalize=True,
-                )
+                # vutils.save_image(
+                #     self.real_image_A_right.detach(),
+                #     f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/A2B_real_image_A_right.png",
+                #     normalize=True,
+                # )
 
         pass
 
@@ -1041,8 +1244,8 @@ class RunTrainManager:
                     f"{self.loss_GAN_A2B:.4f}",
                     f"{self.loss_GAN_B2A:.4f}",
                     f"{self.loss_cycle_ABA:.4f}",
-                    f"{self.loss_cycle_ABA:.4f}",
-                    f"{self.loss_identity_B2A:.4f}",
+                    f"{self.loss_cycle_BAB:.4f}",
+                    f"{self.loss_identity_A2B:.4f}",
                     f"{self.loss_identity_B2A:.4f}",
                     f"{self.v__error_D_A:.4f}",
                     f"{self.v__error_D_B:.4f}",
@@ -1050,6 +1253,64 @@ class RunTrainManager:
                     f"{self.v__error_G_B2A:.4f}",
                 ]
             )
+
+        pass
+
+    def __save_weights(self, epoch: int, done_training: bool) -> None:
+
+        """ Make directories """
+
+        # Make required directories for storing the training output
+        self.makedirs(path=os.path.join(self.DIR_WEIGHTS, self.RUN_PATH), dir="weights")
+
+        """ Save network weights """
+
+        # Save final models
+        if done_training:
+
+            # Save final check points, after every run
+            torch.save(self.net_G_A2B.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_G_A2B/net_G_A2B.pth")
+            torch.save(self.net_G_B2A.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_G_B2A/net_G_B2A.pth")
+            torch.save(self.net_D_A.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_D_A/net_D_A.pth")
+            torch.save(self.net_D_B.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/net_D_B/net_D_B.pth")
+
+        # Save latests models
+        else:
+
+            # Save latest check points, after every run
+            torch.save(self.net_G_A2B.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/latest/net_G_A2B.pth")
+            torch.save(self.net_G_B2A.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/latest/net_G_B2A.pth")
+            torch.save(self.net_D_A.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/latest/net_D_A.pth")
+            torch.save(self.net_D_B.state_dict(), f"{self.DIR_WEIGHTS}/{self.RUN_PATH}/latest/net_D_B.pth")
+
+        pass
+
+    def __save_meta_data(self, run, epoch: int) -> None:
+
+        """ Save meta data and the parameters as .pickle files in """
+
+        # Define meta data
+        META_DATA = {
+            "run": run,
+            "start_epoch": epoch,
+            "lr_lambda": self.lr_lambda,
+            "lr_scheduler_G_A2B": self.lr_scheduler_G_A2B,
+            "lr_scheduler_G_B2A": self.lr_scheduler_G_B2A,
+            "lr_scheduler_D_A": self.lr_scheduler_D_A,
+            "lr_scheduler_D_B": self.lr_scheduler_D_B,
+            "optimizer_G_B2A": self.optimizer_G_B2A,
+            "optimizer_G_A2B": self.optimizer_G_A2B,
+            "optimizer_D_A": self.optimizer_D_A,
+            "optimizer_D_B": self.optimizer_D_B,
+            "learning_rate_gen": run.learning_rate_gen,
+            "learning_rate_dis": run.learning_rate_dis,
+        }
+
+        # Save the meta data as a pickle
+        self.save_pickle(META_DATA, "metadata.pickle", f"{self.DIR_WEIGHTS}/{self.RUN_PATH}")
+
+        # Save run.parameters as a pickle
+        self.save_pickle(self.parameters, "parameters.pickle", f"{self.DIR_WEIGHTS}/{self.RUN_PATH}")
 
         pass
 
@@ -1078,32 +1339,96 @@ class RunTrainManager:
             f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/B/epochs/EP{epoch}___fake_sample_noise.png",
         )
 
+        # GAN loss: D_A(G_B2A(B))
+        self.generated_image_B2A = self.net_G_B2A(self.reference_image_B)
+        self.generated_output_A = self.net_D_A(self.generated_image_B2A)
+        self.loss_GAN_B2A = self.adversarial_loss(self.generated_output_A, self.real_label)
+
+        # GAN loss: D_B(G_A2B(A))
+        self.generated_image_A2B = self.net_G_A2B(self.reference_image_A)
+        self.generated_output_B = self.net_D_B(self.generated_image_A2B)
+        self.loss_GAN_A2B = self.adversarial_loss(self.generated_output_B, self.real_label)
+
         # Save real input images
         vutils.save_image(self.real_image_A, filepath_real_A, normalize=True)
         vutils.save_image(self.real_image_B, filepath_real_B, normalize=True)
 
         # Save real input images with noise
-        vutils.save_image(self.real_image_A_noise, filepath_real_A_noise, normalize=True)
-        vutils.save_image(self.real_image_B_noise, filepath_real_B_noise, normalize=True)
+        if self.NOISE_UNTIL_PERCENTAGE != 0:
+            vutils.save_image(self.real_image_A_noise, filepath_real_A_noise, normalize=True)
+            vutils.save_image(self.real_image_B_noise, filepath_real_B_noise, normalize=True)
 
         # Save the generated (fake) image
         vutils.save_image(self.generated_image_B2A.detach(), filepath_fake_A, normalize=True)
         vutils.save_image(self.generated_image_A2B.detach(), filepath_fake_B, normalize=True)
 
         # Save the generated (fake) image
-        vutils.save_image(self.generated_image_B2A_noise.detach(), filepath_fake_A_noise, normalize=True)
-        vutils.save_image(self.generated_image_A2B_noise.detach(), filepath_fake_B_noise, normalize=True)
+        if self.NOISE_UNTIL_PERCENTAGE != 0:
+            vutils.save_image(self.generated_image_B2A_noise.detach(), filepath_fake_A_noise, normalize=True)
+            vutils.save_image(self.generated_image_A2B_noise.detach(), filepath_fake_B_noise, normalize=True)
 
         # Check point dir
         model_weights_dir = f"{self.DIR_WEIGHTS}/{self.RUN_PATH}"
 
-        # Check points, save weights after each epoch
-        torch.save(self.net_G_A2B.state_dict(), f"{model_weights_dir}/net_G_A2B/net_G_A2B_epoch_{epoch}.pth")
-        torch.save(self.net_G_B2A.state_dict(), f"{model_weights_dir}/net_G_B2A/net_G_B2A_epoch_{epoch}.pth")
-        torch.save(self.net_D_A.state_dict(), f"{model_weights_dir}/net_D_A/net_D_A_epoch_{epoch}.pth")
-        torch.save(self.net_D_B.state_dict(), f"{model_weights_dir}/net_D_B/net_D_B_epoch_{epoch}.pth")
+        if epoch % 5 == 0:
+
+            # Check points, save weights after each epoch
+            torch.save(self.net_G_A2B.state_dict(), f"{model_weights_dir}/net_G_A2B/net_G_A2B_epoch_{epoch:.0d}.pth")
+            torch.save(self.net_G_B2A.state_dict(), f"{model_weights_dir}/net_G_B2A/net_G_B2A_epoch_{epoch:.0d}.pth")
+            torch.save(self.net_D_A.state_dict(), f"{model_weights_dir}/net_D_A/net_D_A_epoch_{epoch:.0d}.pth")
+            torch.save(self.net_D_B.state_dict(), f"{model_weights_dir}/net_D_B/net_D_B_epoch_{epoch:.0d}.pth")
 
         pass
+
+    def __save_per_epoch_snapshot(self, epoch: int) -> None:
+
+        """ Save the output generated using the references images """
+
+        # Create output for reference image A
+        generated_reference_image_B2A = self.net_G_B2A(self.reference_image_B)
+        generated_reference_output_A = self.net_D_A(generated_reference_image_B2A)
+        reference_loss_GAN_B2A = self.adversarial_loss(generated_reference_output_A, self.reference_real_label)
+
+        # Create output for reference image B
+        generated_reference_image_A2B = self.net_G_A2B(self.reference_image_A)
+        generated_reference_output_B = self.net_D_B(self.generated_image_A2B)
+        reference_loss_GAN_A2B = self.adversarial_loss(generated_reference_output_B, self.reference_fake_label)
+
+        # Concatenate with real image
+        reference_A = torch.cat((generated_reference_image_B2A, self.reference_image_A), dim=0)
+        reference_B = torch.cat((generated_reference_image_A2B, self.reference_image_B), dim=0)
+
+        # Define common filepath
+        COMMON_PATH = f"{self.DIR_OUTPUTS}/{self.RUN_PATH}/realtime/features"
+
+        # Filepaths
+        filepath_reference_A = f"{COMMON_PATH}/B2A/{epoch + 1:03d}___reference_A__{reference_loss_GAN_B2A:03d}.png"
+        filepath_reference_B = f"{COMMON_PATH}/A2B/{epoch + 1:03d}___reference_B__{reference_loss_GAN_A2B:03d}.png"
+
+        # Save generated reference samples
+        vutils.save_image(reference_A.detach(), filepath_reference_A, normalize=True)
+        vutils.save_image(reference_B.detach(), filepath_reference_B, normalize=True)
+
+        """ Save weights every 5 epochs """
+
+        # Check point dir
+        model_weights_dir = f"{self.DIR_WEIGHTS}/{self.RUN_PATH}"
+
+        # Check points, save weights after each epoch --> overwrites every epoch
+        torch.save(self.net_G_A2B.state_dict(), f"{model_weights_dir}/latest/net_G_A2B.pth")
+        torch.save(self.net_G_B2A.state_dict(), f"{model_weights_dir}/latest/net_G_B2A.pth")
+        torch.save(self.net_D_A.state_dict(), f"{model_weights_dir}/latest/net_D_A.pth")
+        torch.save(self.net_D_B.state_dict(), f"{model_weights_dir}/latest/net_D_B.pth")
+
+        if epoch % 5 == 0:
+
+            # Check points, save weights after each epoch
+            torch.save(self.net_G_A2B.state_dict(), f"{model_weights_dir}/net_G_A2B/net_G_A2B_epoch_{epoch:.0d}.pth")
+            torch.save(self.net_G_B2A.state_dict(), f"{model_weights_dir}/net_G_B2A/net_G_B2A_epoch_{epoch:.0d}.pth")
+            torch.save(self.net_D_A.state_dict(), f"{model_weights_dir}/net_D_A/net_D_A_epoch_{epoch:.0d}.pth")
+            torch.save(self.net_D_B.state_dict(), f"{model_weights_dir}/net_D_B/net_D_B_epoch_{epoch:.0d}.pth")
+
+        return
 
     def __save_end_epoch_logs(self, epoch, run) -> None:
 
@@ -1123,14 +1448,16 @@ class RunTrainManager:
                     f"{self.avg_rmse_loss_generated_B:.3f}",
                     f"{self.avg_fid_score_generated_A:.3f}",
                     f"{self.avg_fid_score_generated_B:.3f}",
-                    f"{self.avg_error_D_A:.5f}",
-                    f"{self.avg_error_D_B:.5f}",
-                    f"{self.avg_error_G_A2B:.5f}",
-                    f"{self.avg_error_G_B2A:.5f}",
-                    f"{self.v__avg_error_D_A:.5f}",
-                    f"{self.v__avg_error_D_B:.5f}",
-                    f"{self.v__avg_error_G_A2B:.5f}",
-                    f"{self.v__avg_error_G_B2A:.5f}",
+                    f"{self.avg_error_D_A:.3f}",
+                    f"{self.avg_error_D_B:.3f}",
+                    f"{self.avg_error_G_A2B:.3f}",
+                    f"{self.avg_error_G_B2A:.3f}",
+                    f"{self.loss_cycle_ABA:.3f}",
+                    f"{self.loss_cycle_BAB:.3f}",
+                    f"{self.loss_GAN_B2A:.3f}",
+                    f"{self.loss_GAN_A2B:.3f}",
+                    f"{self.loss_identity_B2A:.3f}",
+                    f"{self.loss_identity_A2B:.3f}",
                 ]
             )
 
@@ -1319,6 +1646,29 @@ class RunTrainManager:
 
         pass
 
+    """ Save and load pickles """
+
+    def save_pickle(self, data, name: str, filepath_full: str):
+
+        """ Save data as pickle """
+
+        filepath_full = f"{filepath_full}/{name}"
+
+        with open(filepath_full, "wb") as outfile:
+            pickle.dump(data, outfile, pickle.HIGHEST_PROTOCOL)
+            outfile.close()
+
+        return None
+
+    def load_pickle(self, filepath_full: str) -> pickle:
+
+        filepath_full = filepath_full
+
+        """ Load data from pickle """
+
+        with open(filepath_full, "rb") as file:
+            return pickle.load(file)
+
     """ [ Static ] Functions to calculate the FID Score, create directories and get the run path """
 
     @staticmethod
@@ -1383,6 +1733,8 @@ class RunTrainManager:
                 os.makedirs(os.path.join(path, "net_G_B2A"))
                 os.makedirs(os.path.join(path, "net_D_A"))
                 os.makedirs(os.path.join(path, "net_D_B"))
+                os.makedirs(os.path.join(path, "latest"))
+
             except OSError:
                 pass
 
@@ -1411,9 +1763,11 @@ class RunTrainManager:
         return RUN_PATH
 
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 PARAMETERS: OrderedDict = OrderedDict(
     # System configuration and reproducebility
-    device=[torch.device("cuda" if torch.cuda.is_available() else "cpu")],
+    device=[DEVICE],
     num_workers=[8],
     manual_seed=[999],
     # Dataset
@@ -1423,41 +1777,52 @@ PARAMETERS: OrderedDict = OrderedDict(
     shuffle=[True],
     # Data dimensions
     batch_size=[1],
-    channels=[1],
+    channels=[3],
     # Model learning
     learning_rate_dis=[0.0002],
     learning_rate_gen=[0.0002],
-    num_epochs=[100],
-    decay_epochs=[50],
+    num_epochs=[200],
+    decay_epochs=[100],
 )
 
 
 # Execute main code
 if __name__ == "__main__":
 
-    # Clear the terminal
-    os.system("cls")
-
     try:
 
-        mydataloader = MyDataLoader()
+        # Clear the terminal
+        # os.system("cls")
 
-        channels = 3
-        group = "s2d"
+        # Basic settings
+        channels = PARAMETERS["channels"][0]
+        group = PARAMETERS["dataset_group"][0]
 
-        dataset = mydataloader.get_dataset(group, "Test_Set_RGB_DISPARITY", "train", (100, 180), channels, False)
+        # Get dataset
+        dataset = MyDataLoader().get_dataset(group, "Test_Set_RGB_DISPARITY", "train", (100, 180), channels, False)
+
+        # Initiate manager
         manager = RunTrainManager(dataset, channels, PARAMETERS)
-        manager.start_cycle()
+
+        # Define folder filepaths
+        folder_weights = os.path.join("weights", "s2d")
+        folder_runpath = os.path.join("Test_Set_RGB_DISPARITY", "2021-06-30", "06.19.02___EP200_DE100_LRG0.0002_CH3")
+
+        # Define models folder path
+        folder_models = os.path.join(folder_weights, folder_runpath)
+
+        # Start training
+        manager.start_cycle(use_pretrained_models=False, folder_models=folder_models)
 
         """
 
         # Test_Set_RGB_DISPARITY,       originally (1242, 2208),    train at (68, 120) # (100, 180)
         # DIODE,                        originally (768, 1024),     train at (40, 54)
-        # DIML,                         originally (384, 640),      train at (64, 106)
+        # DIML,                         originally (384, 640),      train at (60, 100) # (100, 168)
 
         # Test_Set_RGB_DISPARITY
         dataset = mydataloader.get_dataset(group, "Test_Set_RGB_DISPARITY", "train", (68, 120), channels, False)
-        manager = RunTrainManager(dataset, channels, PARAMETERS)
+        manager = RunTrainManager(dataset, channels, PARAMET_ERS)
         manager.start_cycle()
 
         # DIML DATASET

@@ -262,7 +262,7 @@ class MyDataLoader:
 
         # Summary
         summary = f"group='{dataset_group}'; name='{dataset_name}', mode='{dataset_mode}', channels='{channels}'; image_size='{image_size}'"
-        print(f"- [MyDataLoader] | Added a dataset; {summary}")
+        # print(f"- [MyDataLoader] | Added a dataset; {summary}")
 
         # Return corresponding dataset class object
         if dataset_group == "l2r":
@@ -297,7 +297,8 @@ class MyDataLoader:
             square_size = (w, w)
 
         if square_size[0] % 4 == 0:
-            print("- [MyDataLoader] | Square image size is divisable by 4, ok. Continue")
+            # print("- [MyDataLoader] | Square image size is divisable by 4, ok. Continue")
+            pass
         else:
             raise Exception(
                 f"- [MyDataLoader] | The square_size (image_size) is not divisable by 4! See: {square_size}"

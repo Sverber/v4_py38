@@ -240,7 +240,8 @@ def test(
                 real_image_B = data["B"].to(run.device)
 
                 # Add the left- and right into one image (image A)
-                real_image_A = torch.add(real_image_A_left, real_image_A_right)
+                # real_image_A = real_image_A_left
+                real_image_A = torch.cat((real_image_A_left, real_image_A_right), dim=0)
 
                 # Normalize again
                 if channels == 1:
@@ -406,15 +407,23 @@ def test(
 
 # Parameters
 PARAMETERS: OrderedDict = OrderedDict(
+    # System configuration and reproducebility
     device=[torch.device("cuda" if torch.cuda.is_available() else "cpu")],
-    shuffle=[False],
     num_workers=[8],
     manual_seed=[999],
+    # Dataset
+    dataset_group=["s2d"],
+    dataset_name=["DIML"],
+    dataset_mode=["train"],
+    shuffle=[True],
+    # Data dimensions
+    batch_size=[1],
+    channels=[1],
+    # Model learning
     learning_rate_dis=[0.0002],
     learning_rate_gen=[0.0002],
-    batch_size=[1],
-    num_epochs=[20],
-    decay_epochs=[10],
+    num_epochs=[200],
+    decay_epochs=[100],
 )
 
 
@@ -426,7 +435,7 @@ if __name__ == "__main__":
         mydataloader = MyDataLoader()
 
         CHANNELS = 3
-        GROUP = "l2r"
+        GROUP = "s2d"
 
         test(
             # Parameters, dataset to use and channels
@@ -439,11 +448,11 @@ if __name__ == "__main__":
             # Model configuration, i.e. directory
             model_group=GROUP,
             model_folder="Test_Set_RGB_DISPARITY",
-            model_date=f"2021-06-22",
-            model_name=f"17.51.25___EP100_DE050_LRG0.0002_CH3",
+            model_date=f"2021-06-29",
+            model_name=f"12.05.35___EP200_DE100_LRG0.0002_CH3",
             # Generator model names
-            model_netG_A2B=f"net_G_A2B.pth",
-            model_netG_B2A=f"net_G_B2A.pth",
+            model_netG_A2B=f"net_G_A2B_epoch_80.pth",
+            model_netG_B2A=f"net_G_B2A_epoch_80.pth",
         )
 
         """

@@ -201,7 +201,7 @@ if __name__ == "__main__":
         """ Transform grayscale to a RGB disparity map """
 
         # transform_GRAYSCALE2DISPARITY(os.path.join("dataset/s2d/Test_Set_RGB_DISPARITY/train/B" + "/*.*"), save=False)
-        transform_GRAYSCALE2DISPARITY(os.path.join("dataset/s2d/DIML/test_disparity/B" + "/*.*"), save=True)
+        # transform_GRAYSCALE2DISPARITY(os.path.join("dataset/s2d/DIML/test_disparity/B" + "/*.*"), save=True)
         # transform_GRAYSCALE2DISPARITY(os.path.join("dataset/s2d/DrivingStereoDemo/test/B" + "/*.*"), save=True)
 
         """ Transform RGB colours to their inverse """
@@ -209,6 +209,8 @@ if __name__ == "__main__":
         # transform_RGB2INVERTED_RGB(os.path.join("dataset/s2d/Test_Set_RGB_DISPARITY/train/B" + "/*.*"))
 
         """ Transform channels to {x} channels """
+
+        transform_CHANNELS2xCHANNELS(os.path.join("dataset/s2d/DIML/train/B" + "/*.*"), 3)
 
         # transform_CHANNELS2xCHANNELS(os.path.join("dataset/l2r/Test_Set_GRAYSCALE/train/left" + "/*.*"), 1)
         # transform_CHANNELS2xCHANNELS(os.path.join("dataset/l2r/Test_Set_GRAYSCALE/train/right" + "/*.*"), 1)
