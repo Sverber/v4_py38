@@ -1420,7 +1420,7 @@ class RunTrainManager:
         torch.save(self.net_D_A.state_dict(), f"{model_weights_dir}/latest/net_D_A.pth")
         torch.save(self.net_D_B.state_dict(), f"{model_weights_dir}/latest/net_D_B.pth")
 
-        if epoch % 5 == 0
+        if epoch % 5 == 0:
 
             # Check points, save weights after each epoch
             torch.save(self.net_G_A2B.state_dict(), f"{model_weights_dir}/net_G_A2B/net_G_A2B_epoch_{epoch + 1:03d}.pth")
